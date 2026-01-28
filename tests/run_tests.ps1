@@ -16,9 +16,6 @@ param(
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $rootDir = Split-Path -Parent $scriptDir
 
-# Import the main pipeline
-. (Join-Path $rootDir "scripts\run_pipeline.ps1")
-
 # Test results tracking
 $testResults = @()
 

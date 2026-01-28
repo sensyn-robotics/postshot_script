@@ -167,5 +167,4 @@ function Get-ColmapArgs {
     return $args
 }
 
-# Export functions
-Export-ModuleMember -Function Load-Config, Validate-Config, Get-ColmapArgs, Get-ScriptRoot
+# Functions are automatically available when dot-sourced
