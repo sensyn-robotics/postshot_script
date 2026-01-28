@@ -3,16 +3,16 @@
 
 param(
     [Parameter(Mandatory=$false)]
-    [string]$InputPath,
+    [string]$PostshotInput,
 
     [Parameter(Mandatory=$false)]
-    [string]$OutputPath,
+    [string]$PostshotOutput,
 
     [Parameter(Mandatory=$false)]
-    [PSCustomObject]$Config,
+    [PSCustomObject]$PostshotConfig,
 
     [Parameter(Mandatory=$false)]
-    [switch]$ExportPly
+    [switch]$DoExportPly
 )
 
 # Import config loader
@@ -346,7 +346,7 @@ function Run-PostshotPipeline {
 
 # Main execution when script is run directly
 if ($MyInvocation.InvocationName -ne '.') {
-    $result = Run-PostshotPipeline -InputPath $InputPath -OutputPath $OutputPath -Config $Config -ExportPly $ExportPly
+    $result = Run-PostshotPipeline -InputPath $PostshotInput -OutputPath $PostshotOutput -Config $PostshotConfig -ExportPly $DoExportPly
     if ($result.Success) {
         Write-Host "`nPostshot processing completed successfully" -ForegroundColor Green
         Write-Host "  PSHT: $($result.PshtPath)" -ForegroundColor Cyan
