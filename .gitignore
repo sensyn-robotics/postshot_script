@@ -1,0 +1,28 @@
+# Temporary files
+*.tmp
+*.log
+*.bak
+
+# COLMAP output (large binary files)
+colmap_output/
+*.db
+
+# Postshot output
+*.psht
+*.ply
+
+# Extracted frames (generated from video)
+images/
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Credentials (never commit)
+*credentials*
+*secret*
+*.key
