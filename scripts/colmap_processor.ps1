@@ -2,10 +2,10 @@
 # COLMAP SfM pipeline for sparse reconstruction
 
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=$false)]
     [string]$ImageDir,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=$false)]
     [string]$OutputDir,
 
     [Parameter(Mandatory=$false)]

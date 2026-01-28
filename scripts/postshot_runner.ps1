@@ -2,10 +2,10 @@
 # Postshot CLI wrapper with credential management and COLMAP support
 
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=$false)]
     [string]$InputPath,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=$false)]
     [string]$OutputPath,
 
     [Parameter(Mandatory=$false)]

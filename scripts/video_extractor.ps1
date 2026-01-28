@@ -2,10 +2,10 @@
 # Extract frames from video files using FFmpeg
 
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=$false)]
     [string]$VideoPath,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=$false)]
     [string]$OutputDir,
 
     [Parameter(Mandatory=$false)]
