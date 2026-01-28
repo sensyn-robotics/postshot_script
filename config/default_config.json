@@ -1,0 +1,32 @@
+{
+  "paths": {
+    "colmap_exe": "C:\\Program Files\\COLMAP\\COLMAP.bat",
+    "ffmpeg_exe": "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe",
+    "postshot_cli": "C:\\Program Files\\Jawset Postshot\\bin\\postshot-cli.exe",
+    "temp_directory": "C:\\Postshot_Temp"
+  },
+  "video_extraction": {
+    "fps": 2,
+    "output_format": "jpg",
+    "quality": 2
+  },
+  "colmap": {
+    "feature_extractor": {
+      "ImageReader.single_camera_per_folder": 1,
+      "ImageReader.camera_model": "OPENCV",
+      "SiftExtraction.use_gpu": 1,
+      "SiftExtraction.max_num_features": 8192
+    },
+    "matcher": {
+      "type": "exhaustive",
+      "SiftMatching.use_gpu": 1
+    },
+    "mapper": {
+      "Mapper.ba_global_max_num_iterations": 50
+    }
+  },
+  "postshot": {
+    "train_iterations": 30000,
+    "export_ply": true
+  }
+}
