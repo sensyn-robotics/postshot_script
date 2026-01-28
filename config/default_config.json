@@ -1,7 +1,7 @@
 {
   "paths": {
-    "colmap_exe": "C:\\Program Files\\COLMAP\\COLMAP.bat",
-    "ffmpeg_exe": "C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe",
+    "colmap_exe": "C:\\COLMAP\\COLMAP.bat",
+    "ffmpeg_exe": "C:\\ffmpeg\\bin\\ffmpeg.exe",
     "postshot_cli": "C:\\Program Files\\Jawset Postshot\\bin\\postshot-cli.exe",
     "temp_directory": "C:\\Postshot_Temp"
   },
