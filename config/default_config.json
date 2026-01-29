@@ -6,8 +6,8 @@
     "temp_directory": "C:\\Postshot_Temp"
   },
   "video_extraction": {
-    "fps": 2,
-    "output_format": "jpg",
+    "fps": 1,
+    "output_format": "png",
     "quality": 2
   },
   "colmap": {
