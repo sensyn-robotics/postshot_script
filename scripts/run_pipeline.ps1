@@ -101,23 +101,27 @@ function Get-ProjectPaths {
     Generate standard paths for a project
 
     .PARAMETER BasePath
-    Base directory for the project
+    Base directory for the project (where input files are)
 
     .OUTPUTS
     PSCustomObject with all project paths
+    Output files go to BasePath/output/ subdirectory
     #>
     param(
         [Parameter(Mandatory=$true)]
         [string]$BasePath
     )
 
+    $outputDir = Join-Path $BasePath "output"
+
     return [PSCustomObject]@{
         Base = $BasePath
-        Images = Join-Path $BasePath "images"
-        ColmapOutput = Join-Path $BasePath "colmap_output"
-        Sparse = Join-Path $BasePath "colmap_output\sparse\0"
-        Psht = Join-Path $BasePath "scene.psht"
-        Ply = Join-Path $BasePath "scene.ply"
+        Output = $outputDir
+        Images = Join-Path $outputDir "images"
+        ColmapOutput = Join-Path $outputDir "colmap_output"
+        Sparse = Join-Path $outputDir "colmap_output\sparse\0"
+        Psht = Join-Path $outputDir "scene.psht"
+        Ply = Join-Path $outputDir "scene.ply"
     }
 }
 
