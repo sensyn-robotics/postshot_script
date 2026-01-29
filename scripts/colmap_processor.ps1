@@ -106,13 +106,13 @@ function Run-ColmapFeatureExtraction {
         "--image_path", $ImagePath
     )
 
-    # Add feature extractor options from config
+    # Add feature extractor options from config (use --Option=value format)
     foreach ($prop in $featureConfig.PSObject.Properties) {
-        $colmapArgs += "--$($prop.Name)"
-        $colmapArgs += "$($prop.Value)"
+        $colmapArgs += "--$($prop.Name)=$($prop.Value)"
     }
 
     Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
+    Write-Host "  single_camera_per_folder: $($featureConfig.'ImageReader.single_camera_per_folder')" -ForegroundColor Yellow
 
     # Use call operator to run in current environment (inherits PATH changes)
     & $colmapBin $colmapArgs
@@ -185,11 +185,10 @@ function Run-ColmapMatching {
         "--database_path", $DatabasePath
     )
 
-    # Add matcher options from config (skip 'type' property)
+    # Add matcher options from config (skip 'type' property, use --Option=value format)
     foreach ($prop in $matcherConfig.PSObject.Properties) {
         if ($prop.Name -eq "type") { continue }
-        $colmapArgs += "--$($prop.Name)"
-        $colmapArgs += "$($prop.Value)"
+        $colmapArgs += "--$($prop.Name)=$($prop.Value)"
     }
 
     Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
@@ -275,10 +274,9 @@ function Run-ColmapMapper {
         "--output_path", $OutputPath
     )
 
-    # Add mapper options from config
+    # Add mapper options from config (use --Option=value format)
     foreach ($prop in $mapperConfig.PSObject.Properties) {
-        $colmapArgs += "--$($prop.Name)"
-        $colmapArgs += "$($prop.Value)"
+        $colmapArgs += "--$($prop.Name)=$($prop.Value)"
     }
 
     Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
