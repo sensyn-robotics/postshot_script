@@ -25,13 +25,38 @@ if (-not $Config) {
     $Config = Load-Config
 }
 
+function Setup-ColmapEnvironment {
+    <#
+    .SYNOPSIS
+    Set up environment for COLMAP execution
+
+    .PARAMETER ColmapPath
+    Path to COLMAP installation (parent of bin folder)
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ColmapPath
+    )
+
+    $binPath = Join-Path $ColmapPath "bin"
+    $pluginsPath = Join-Path $ColmapPath "plugins"
+
+    # Add COLMAP bin to PATH if not already present
+    if ($env:PATH -notlike "*$binPath*") {
+        $env:PATH = "$binPath;$env:PATH"
+    }
+
+    # Set Qt plugin path
+    $env:QT_PLUGIN_PATH = $pluginsPath
+}
+
 function Run-ColmapFeatureExtraction {
     <#
     .SYNOPSIS
     Run COLMAP feature extraction
 
     .PARAMETER ColmapExe
-    Path to COLMAP executable
+    Path to COLMAP executable or batch file
 
     .PARAMETER DatabasePath
     Path to COLMAP database file
@@ -59,9 +84,23 @@ function Run-ColmapFeatureExtraction {
     Write-Host ""
     Write-Host "=== COLMAP Feature Extraction ===" -ForegroundColor Cyan
 
+    # Set up COLMAP environment
+    $colmapDir = Split-Path -Parent (Split-Path -Parent $ColmapExe)
+    if ($ColmapExe -like "*.bat") {
+        $colmapDir = Split-Path -Parent $ColmapExe
+    }
+    Setup-ColmapEnvironment -ColmapPath $colmapDir
+
+    # Get the actual colmap.exe path
+    $colmapBin = if ($ColmapExe -like "*.bat") {
+        Join-Path $colmapDir "bin\colmap.exe"
+    } else {
+        $ColmapExe
+    }
+
     $featureConfig = $Config.colmap.feature_extractor
 
-    $args = @(
+    $colmapArgs = @(
         "feature_extractor",
         "--database_path", $DatabasePath,
         "--image_path", $ImagePath
@@ -69,16 +108,18 @@ function Run-ColmapFeatureExtraction {
 
     # Add feature extractor options from config
     foreach ($prop in $featureConfig.PSObject.Properties) {
-        $args += "--$($prop.Name)"
-        $args += "$($prop.Value)"
+        $colmapArgs += "--$($prop.Name)"
+        $colmapArgs += "$($prop.Value)"
     }
 
-    Write-Host "Running: colmap $($args -join ' ')" -ForegroundColor DarkGray
+    Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
 
-    $process = Start-Process -FilePath $ColmapExe -ArgumentList $args -NoNewWindow -Wait -PassThru
+    # Use call operator to run in current environment (inherits PATH changes)
+    & $colmapBin $colmapArgs
+    $exitCode = $LASTEXITCODE
 
-    if ($process.ExitCode -ne 0) {
-        Write-Host "ERROR: Feature extraction failed with exit code: $($process.ExitCode)" -ForegroundColor Red
+    if ($exitCode -ne 0) {
+        Write-Host "ERROR: Feature extraction failed with exit code: $exitCode" -ForegroundColor Red
         return $false
     }
 
@@ -92,7 +133,7 @@ function Run-ColmapMatching {
     Run COLMAP feature matching
 
     .PARAMETER ColmapExe
-    Path to COLMAP executable
+    Path to COLMAP executable or batch file
 
     .PARAMETER DatabasePath
     Path to COLMAP database file
@@ -121,10 +162,25 @@ function Run-ColmapMatching {
     Write-Host ""
     Write-Host "=== COLMAP Feature Matching ($MatcherType) ===" -ForegroundColor Cyan
 
+    # Set up COLMAP environment
+    $colmapDir = if ($ColmapExe -like "*.bat") {
+        Split-Path -Parent $ColmapExe
+    } else {
+        Split-Path -Parent (Split-Path -Parent $ColmapExe)
+    }
+    Setup-ColmapEnvironment -ColmapPath $colmapDir
+
+    # Get the actual colmap.exe path
+    $colmapBin = if ($ColmapExe -like "*.bat") {
+        Join-Path $colmapDir "bin\colmap.exe"
+    } else {
+        $ColmapExe
+    }
+
     $matcherConfig = $Config.colmap.matcher
 
     $matcherCommand = "${MatcherType}_matcher"
-    $args = @(
+    $colmapArgs = @(
         $matcherCommand,
         "--database_path", $DatabasePath
     )
@@ -132,16 +188,17 @@ function Run-ColmapMatching {
     # Add matcher options from config (skip 'type' property)
     foreach ($prop in $matcherConfig.PSObject.Properties) {
         if ($prop.Name -eq "type") { continue }
-        $args += "--$($prop.Name)"
-        $args += "$($prop.Value)"
+        $colmapArgs += "--$($prop.Name)"
+        $colmapArgs += "$($prop.Value)"
     }
 
-    Write-Host "Running: colmap $($args -join ' ')" -ForegroundColor DarkGray
+    Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
 
-    $process = Start-Process -FilePath $ColmapExe -ArgumentList $args -NoNewWindow -Wait -PassThru
+    & $colmapBin $colmapArgs
+    $exitCode = $LASTEXITCODE
 
-    if ($process.ExitCode -ne 0) {
-        Write-Host "ERROR: Feature matching failed with exit code: $($process.ExitCode)" -ForegroundColor Red
+    if ($exitCode -ne 0) {
+        Write-Host "ERROR: Feature matching failed with exit code: $exitCode" -ForegroundColor Red
         return $false
     }
 
@@ -155,7 +212,7 @@ function Run-ColmapMapper {
     Run COLMAP sparse reconstruction (mapper)
 
     .PARAMETER ColmapExe
-    Path to COLMAP executable
+    Path to COLMAP executable or batch file
 
     .PARAMETER DatabasePath
     Path to COLMAP database file
@@ -189,6 +246,21 @@ function Run-ColmapMapper {
     Write-Host ""
     Write-Host "=== COLMAP Mapper (Sparse Reconstruction) ===" -ForegroundColor Cyan
 
+    # Set up COLMAP environment
+    $colmapDir = if ($ColmapExe -like "*.bat") {
+        Split-Path -Parent $ColmapExe
+    } else {
+        Split-Path -Parent (Split-Path -Parent $ColmapExe)
+    }
+    Setup-ColmapEnvironment -ColmapPath $colmapDir
+
+    # Get the actual colmap.exe path
+    $colmapBin = if ($ColmapExe -like "*.bat") {
+        Join-Path $colmapDir "bin\colmap.exe"
+    } else {
+        $ColmapExe
+    }
+
     # Create output directory
     if (-not (Test-Path $OutputPath)) {
         New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
@@ -196,7 +268,7 @@ function Run-ColmapMapper {
 
     $mapperConfig = $Config.colmap.mapper
 
-    $args = @(
+    $colmapArgs = @(
         "mapper",
         "--database_path", $DatabasePath,
         "--image_path", $ImagePath,
@@ -205,16 +277,17 @@ function Run-ColmapMapper {
 
     # Add mapper options from config
     foreach ($prop in $mapperConfig.PSObject.Properties) {
-        $args += "--$($prop.Name)"
-        $args += "$($prop.Value)"
+        $colmapArgs += "--$($prop.Name)"
+        $colmapArgs += "$($prop.Value)"
     }
 
-    Write-Host "Running: colmap $($args -join ' ')" -ForegroundColor DarkGray
+    Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
 
-    $process = Start-Process -FilePath $ColmapExe -ArgumentList $args -NoNewWindow -Wait -PassThru
+    & $colmapBin $colmapArgs
+    $exitCode = $LASTEXITCODE
 
-    if ($process.ExitCode -ne 0) {
-        Write-Host "ERROR: Mapper failed with exit code: $($process.ExitCode)" -ForegroundColor Red
+    if ($exitCode -ne 0) {
+        Write-Host "ERROR: Mapper failed with exit code: $exitCode" -ForegroundColor Red
         return $false
     }
 
@@ -360,7 +433,7 @@ function Get-ColmapStats {
     Path to sparse reconstruction directory (containing cameras.bin, images.bin, points3D.bin)
 
     .PARAMETER ColmapExe
-    Path to COLMAP executable
+    Path to COLMAP executable or batch file
 
     .OUTPUTS
     PSCustomObject with reconstruction statistics
@@ -376,14 +449,29 @@ function Get-ColmapStats {
     Write-Host ""
     Write-Host "=== COLMAP Reconstruction Statistics ===" -ForegroundColor Cyan
 
+    # Set up COLMAP environment
+    $colmapDir = if ($ColmapExe -like "*.bat") {
+        Split-Path -Parent $ColmapExe
+    } else {
+        Split-Path -Parent (Split-Path -Parent $ColmapExe)
+    }
+    Setup-ColmapEnvironment -ColmapPath $colmapDir
+
+    # Get the actual colmap.exe path
+    $colmapBin = if ($ColmapExe -like "*.bat") {
+        Join-Path $colmapDir "bin\colmap.exe"
+    } else {
+        $ColmapExe
+    }
+
     # Run model_analyzer to get stats
-    $args = @(
+    $colmapArgs = @(
         "model_analyzer",
         "--path", $SparsePath
     )
 
     try {
-        $output = & $ColmapExe $args 2>&1
+        $output = & $colmapBin $colmapArgs 2>&1
         Write-Host $output -ForegroundColor DarkGray
 
         # Parse basic stats from output

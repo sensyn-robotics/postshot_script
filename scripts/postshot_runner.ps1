@@ -83,13 +83,16 @@ function Run-PostshotTrain {
     Run Postshot training on input data
 
     .PARAMETER InputPath
-    Path to input (COLMAP project directory or video file)
+    Path to input (images directory or video file)
 
     .PARAMETER OutputPath
     Path to output .psht file
 
     .PARAMETER Config
     Configuration object
+
+    .PARAMETER ColmapSparsePath
+    Optional path to COLMAP sparse reconstruction for camera poses and point initialization
 
     .OUTPUTS
     Returns output path on success, $null on failure
@@ -102,7 +105,10 @@ function Run-PostshotTrain {
         [string]$OutputPath,
 
         [Parameter(Mandatory=$true)]
-        [PSCustomObject]$Config
+        [PSCustomObject]$Config,
+
+        [Parameter(Mandatory=$false)]
+        [string]$ColmapSparsePath
     )
 
     $postshotCli = $Config.paths.postshot_cli
@@ -151,12 +157,24 @@ function Run-PostshotTrain {
             '--login', $Cred.UserName,
             '--password', $PlainTextPassword,
             'train',
-            '-i', $InputPath,
-            '-o', $OutputPath
+            '-i', $InputPath
         )
 
-        Write-Host "Starting Postshot CLI training. This may take a long time..." -ForegroundColor Yellow
-        Write-Host "Command: $postshotCli --login $($Cred.UserName) --password [REDACTED] train -i `"$InputPath`" -o `"$OutputPath`"" -ForegroundColor DarkGray
+        # Add COLMAP sparse path for camera poses and point initialization
+        if ($ColmapSparsePath -and (Test-Path $ColmapSparsePath)) {
+            $CliArgs += @('-i', $ColmapSparsePath)
+            Write-Host "  Using COLMAP sparse for initialization: $ColmapSparsePath" -ForegroundColor Cyan
+        }
+
+        $CliArgs += @('-o', $OutputPath)
+
+        Write-Host "Starting Postshot CLI training..." -ForegroundColor Yellow
+        $cmdDisplay = "$postshotCli --login $($Cred.UserName) --password [REDACTED] train -i `"$InputPath`""
+        if ($ColmapSparsePath) {
+            $cmdDisplay += " -i `"$ColmapSparsePath`""
+        }
+        $cmdDisplay += " -o `"$OutputPath`""
+        Write-Host "Command: $cmdDisplay" -ForegroundColor DarkGray
 
         & $postshotCli $CliArgs
 
@@ -241,16 +259,17 @@ function Run-PostshotExport {
     $PlainTextPassword = $MarshalType::PtrToStringAuto($BSTR)
 
     try {
+        # Postshot CLI export uses -f for input and --export-splat for PLY output
         $CliArgs = @(
             '--login', $Cred.UserName,
             '--password', $PlainTextPassword,
             'export',
-            '-i', $InputPsht,
-            '-o', $OutputPly
+            '-f', $InputPsht,
+            '--export-splat', $OutputPly
         )
 
         Write-Host "Starting Postshot CLI export..." -ForegroundColor Yellow
-        Write-Host "Command: $postshotCli --login $($Cred.UserName) --password [REDACTED] export -i `"$InputPsht`" -o `"$OutputPly`"" -ForegroundColor DarkGray
+        Write-Host "Command: $postshotCli --login $($Cred.UserName) --password [REDACTED] export -f `"$InputPsht`" --export-splat `"$OutputPly`"" -ForegroundColor DarkGray
 
         & $postshotCli $CliArgs
 
@@ -285,7 +304,7 @@ function Run-PostshotPipeline {
     Run complete Postshot pipeline: train and optionally export PLY
 
     .PARAMETER InputPath
-    Path to input (COLMAP project directory or video file)
+    Path to input (images directory or video file)
 
     .PARAMETER OutputPath
     Path to output .psht file
@@ -295,6 +314,9 @@ function Run-PostshotPipeline {
 
     .PARAMETER ExportPly
     If true, also export to PLY after training
+
+    .PARAMETER ColmapSparsePath
+    Optional path to COLMAP sparse reconstruction for camera poses and point initialization
 
     .OUTPUTS
     PSCustomObject with output paths
@@ -310,7 +332,10 @@ function Run-PostshotPipeline {
         [PSCustomObject]$Config,
 
         [Parameter(Mandatory=$false)]
-        [bool]$ExportPly = $true
+        [bool]$ExportPly = $true,
+
+        [Parameter(Mandatory=$false)]
+        [string]$ColmapSparsePath
     )
 
     Write-Host ""
@@ -325,7 +350,7 @@ function Run-PostshotPipeline {
     }
 
     # Step 1: Train
-    $pshtPath = Run-PostshotTrain -InputPath $InputPath -OutputPath $OutputPath -Config $Config
+    $pshtPath = Run-PostshotTrain -InputPath $InputPath -OutputPath $OutputPath -Config $Config -ColmapSparsePath $ColmapSparsePath
     if (-not $pshtPath) {
         return $result
     }

@@ -291,10 +291,14 @@ function Run-FullPipeline {
     # Stage 3: Postshot Training
     Write-Host "`n--- Stage 3: Postshot Training ---" -ForegroundColor Yellow
 
-    # For Postshot, the input should be the project root (parent of images and sparse/colmap_output)
-    $postshotInput = $result.ProjectPath
+    # For Postshot, input is images folder, and we pass COLMAP sparse for camera poses and point initialization
+    $postshotInput = $paths.Images
+    $colmapSparse = $paths.Sparse
 
-    $postshotResult = Run-PostshotPipeline -InputPath $postshotInput -OutputPath $paths.Psht -Config $Config -ExportPly $Config.postshot.export_ply
+    Write-Host "  Images: $postshotInput" -ForegroundColor Cyan
+    Write-Host "  COLMAP sparse: $colmapSparse" -ForegroundColor Cyan
+
+    $postshotResult = Run-PostshotPipeline -InputPath $postshotInput -OutputPath $paths.Psht -Config $Config -ExportPly $Config.postshot.export_ply -ColmapSparsePath $colmapSparse
     if (-not $postshotResult.Success) {
         $result.Errors += "Postshot training failed"
         return $result
