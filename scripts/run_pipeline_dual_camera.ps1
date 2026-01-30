@@ -167,13 +167,14 @@ function Merge-DualCameraModel {
     $imagesFile = Join-Path $textModelPath "images.txt"
     $points3DFile = Join-Path $textModelPath "points3D.txt"
 
-    $camerasContent = Get-Content $camerasFile -Raw
-    $imagesContent = Get-Content $imagesFile
-    $points3DContent = Get-Content $points3DFile -Raw
+    # Read files (handle CRLF line endings)
+    $camerasContent = [System.IO.File]::ReadAllText($camerasFile)
+    $imagesContent = [System.IO.File]::ReadAllLines($imagesFile)
+    $points3DContent = [System.IO.File]::ReadAllText($points3DFile)
 
     # Parse existing camera (camera 1 = W)
     # Format: CAMERA_ID, MODEL, WIDTH, HEIGHT, PARAMS[]
-    $cameraLines = $camerasContent -split "`n" | Where-Object { $_ -and $_ -notmatch "^#" }
+    $cameraLines = $camerasContent -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith("#") }
 
     if ($cameraLines.Count -eq 0) {
         Write-Host "ERROR: No camera found in W model" -ForegroundColor Red
@@ -181,8 +182,8 @@ function Merge-DualCameraModel {
     }
 
     # Get W camera info
-    $wCameraLine = $cameraLines[0]
-    $wCameraParts = $wCameraLine -split "\s+"
+    $wCameraLine = $cameraLines[0].Trim()
+    $wCameraParts = $wCameraLine -split "\s+" | Where-Object { $_ }
     $wCameraId = $wCameraParts[0]
     $wCameraModel = $wCameraParts[1]
     $wWidth = $wCameraParts[2]
@@ -214,14 +215,14 @@ function Merge-DualCameraModel {
     # Parse W images to get their poses
     # Format: IMAGE_ID, QW, QX, QY, QZ, TX, TY, TZ, CAMERA_ID, NAME
     #         POINTS2D[] as (X, Y, POINT3D_ID)
-    $imageLines = $imagesContent | Where-Object { $_ -and $_ -notmatch "^#" }
+    $imageLines = $imagesContent | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith("#") }
 
     # Build mapping of W frame names to their poses
     $wPoses = @{}
     for ($i = 0; $i -lt $imageLines.Count; $i += 2) {
-        $imageLine = $imageLines[$i]
+        $imageLine = $imageLines[$i].Trim()
         if ($imageLine -match "^\d+") {
-            $parts = $imageLine -split "\s+"
+            $parts = $imageLine -split "\s+" | Where-Object { $_ }
             $imageId = $parts[0]
             $qw = $parts[1]
             $qx = $parts[2]
@@ -257,9 +258,9 @@ function Merge-DualCameraModel {
 
     # Add W images (keep original)
     for ($i = 0; $i -lt $imageLines.Count; $i += 2) {
-        $imageLine = $imageLines[$i]
+        $imageLine = $imageLines[$i].Trim()
         if ($imageLine -match "^\d+") {
-            $parts = $imageLine -split "\s+"
+            $parts = $imageLine -split "\s+" | Where-Object { $_ }
             # Update image ID to be sequential
             $parts[0] = $nextImageId.ToString()
             $newImagesContent += ($parts -join " ")
