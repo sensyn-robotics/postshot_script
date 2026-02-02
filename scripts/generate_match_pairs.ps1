@@ -193,8 +193,10 @@ if (-not (Test-Path $zPath)) {
 }
 
 # Get images from each folder
-$wImages = @(Get-ChildItem -Path $wPath -Include @("*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG") -File | Sort-Object Name)
-$zImages = @(Get-ChildItem -Path $zPath -Include @("*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG") -File | Sort-Object Name)
+# Note: -Include requires -Recurse in PowerShell, so we use Where-Object instead
+$imageExtensions = @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG")
+$wImages = @(Get-ChildItem -Path $wPath -File | Where-Object { $imageExtensions -contains $_.Extension } | Sort-Object Name)
+$zImages = @(Get-ChildItem -Path $zPath -File | Where-Object { $imageExtensions -contains $_.Extension } | Sort-Object Name)
 
 Write-Host ""
 Write-Host "  Wide images: $($wImages.Count)" -ForegroundColor Cyan
