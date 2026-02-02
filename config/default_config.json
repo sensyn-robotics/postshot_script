@@ -14,14 +14,12 @@
     "feature_extractor": {
       "ImageReader.single_camera_per_folder": 1,
       "ImageReader.camera_model": "OPENCV",
-      "SiftExtraction.max_num_features": 8192,
-      "SiftExtraction.use_gpu": 1
+      "SiftExtraction.max_num_features": 8192
     },
     "matcher": {
       "type": "custom_pairs",
       "temporal_overlap": 10,
-      "cross_camera_same_timestamp": true,
-      "SiftMatching.use_gpu": 1
+      "cross_camera_same_timestamp": true
     },
     "mapper": {
       "Mapper.ba_global_max_num_iterations": 50,

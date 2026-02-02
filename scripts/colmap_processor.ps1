@@ -1,32 +1,29 @@
 # colmap_processor.ps1
 # COLMAP SfM pipeline for sparse reconstruction
+#
+# NOTE: Script-level params use _Script prefix to avoid conflicts when dot-sourced
 
 param(
     [Parameter(Mandatory=$false)]
-    [string]$ImageDir,
+    [string]$_ScriptImageDir,
 
     [Parameter(Mandatory=$false)]
-    [string]$OutputDir,
+    [string]$_ScriptOutputDir,
 
     [Parameter(Mandatory=$false)]
-    [PSCustomObject]$Config,
+    [PSCustomObject]$_ScriptConfig,
 
     [Parameter(Mandatory=$false)]
     [ValidateSet("exhaustive", "sequential", "custom_pairs")]
-    [string]$MatcherType = "exhaustive",
+    [string]$_ScriptMatcherType = "exhaustive",
 
     [Parameter(Mandatory=$false)]
-    [string]$MatchPairsPath
+    [string]$_ScriptMatchPairsPath
 )
 
 # Import config loader
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path (Split-Path -Parent $scriptDir) "lib\config_loader.ps1")
-
-# Load config if not provided
-if (-not $Config) {
-    $Config = Load-Config
-}
 
 function Setup-ColmapEnvironment {
     <#
@@ -548,14 +545,19 @@ function Get-ColmapStats {
 
 # Main execution when script is run directly
 if ($MyInvocation.InvocationName -ne '.') {
-    $pipelineParams = @{
-        ImageDir = $ImageDir
-        OutputDir = $OutputDir
-        Config = $Config
-        MatcherType = $MatcherType
+    # Load config if not provided via script params
+    if (-not $_ScriptConfig) {
+        $_ScriptConfig = Load-Config
     }
-    if ($MatchPairsPath) {
-        $pipelineParams.MatchPairsPath = $MatchPairsPath
+
+    $pipelineParams = @{
+        ImageDir = $_ScriptImageDir
+        OutputDir = $_ScriptOutputDir
+        Config = $_ScriptConfig
+        MatcherType = $_ScriptMatcherType
+    }
+    if ($_ScriptMatchPairsPath) {
+        $pipelineParams.MatchPairsPath = $_ScriptMatchPairsPath
     }
     $result = Run-ColmapPipeline @pipelineParams
     if ($result) {
