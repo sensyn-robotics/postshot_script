@@ -12,8 +12,11 @@ param(
     [PSCustomObject]$Config,
 
     [Parameter(Mandatory=$false)]
-    [ValidateSet("exhaustive", "sequential")]
-    [string]$MatcherType = "exhaustive"
+    [ValidateSet("exhaustive", "sequential", "custom_pairs")]
+    [string]$MatcherType = "exhaustive",
+
+    [Parameter(Mandatory=$false)]
+    [string]$MatchPairsPath
 )
 
 # Import config loader
@@ -139,10 +142,13 @@ function Run-ColmapMatching {
     Path to COLMAP database file
 
     .PARAMETER MatcherType
-    Type of matcher: "exhaustive" or "sequential"
+    Type of matcher: "exhaustive", "sequential", or "custom_pairs"
 
     .PARAMETER Config
     Configuration object with matcher settings
+
+    .PARAMETER MatchPairsPath
+    Path to match_pairs.txt file (required for custom_pairs matcher)
     #>
     param(
         [Parameter(Mandatory=$true)]
@@ -152,11 +158,14 @@ function Run-ColmapMatching {
         [string]$DatabasePath,
 
         [Parameter(Mandatory=$true)]
-        [ValidateSet("exhaustive", "sequential")]
+        [ValidateSet("exhaustive", "sequential", "custom_pairs")]
         [string]$MatcherType,
 
         [Parameter(Mandatory=$true)]
-        [PSCustomObject]$Config
+        [PSCustomObject]$Config,
+
+        [Parameter(Mandatory=$false)]
+        [string]$MatchPairsPath
     )
 
     Write-Host ""
@@ -179,26 +188,62 @@ function Run-ColmapMatching {
 
     $matcherConfig = $Config.colmap.matcher
 
-    $matcherCommand = "${MatcherType}_matcher"
-    $colmapArgs = @(
-        $matcherCommand,
-        "--database_path", $DatabasePath
-    )
+    # Handle custom_pairs matcher differently
+    if ($MatcherType -eq "custom_pairs") {
+        if (-not $MatchPairsPath -or -not (Test-Path $MatchPairsPath)) {
+            Write-Host "ERROR: Custom pairs matcher requires a valid match_pairs.txt file" -ForegroundColor Red
+            Write-Host "  Expected at: $MatchPairsPath" -ForegroundColor Red
+            return $false
+        }
 
-    # Add matcher options from config (skip 'type' property, use --Option=value format)
-    foreach ($prop in $matcherConfig.PSObject.Properties) {
-        if ($prop.Name -eq "type") { continue }
-        $colmapArgs += "--$($prop.Name)=$($prop.Value)"
+        # Use matches_importer for custom pairs
+        $colmapArgs = @(
+            "matches_importer",
+            "--database_path", $DatabasePath,
+            "--match_list_path", $MatchPairsPath,
+            "--match_type", "pairs"
+        )
+
+        # Add SIFT matching options from config (skip non-SIFT properties)
+        foreach ($prop in $matcherConfig.PSObject.Properties) {
+            if ($prop.Name -in @("type", "temporal_overlap", "cross_camera_same_timestamp")) { continue }
+            $colmapArgs += "--$($prop.Name)=$($prop.Value)"
+        }
+
+        Write-Host "  Using custom pairs from: $MatchPairsPath" -ForegroundColor Yellow
+        Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
+
+        & $colmapBin $colmapArgs
+        $exitCode = $LASTEXITCODE
+
+        if ($exitCode -ne 0) {
+            Write-Host "ERROR: matches_importer failed with exit code: $exitCode" -ForegroundColor Red
+            return $false
+        }
     }
+    else {
+        # Standard exhaustive or sequential matcher
+        $matcherCommand = "${MatcherType}_matcher"
+        $colmapArgs = @(
+            $matcherCommand,
+            "--database_path", $DatabasePath
+        )
 
-    Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
+        # Add matcher options from config (skip 'type' property, use --Option=value format)
+        foreach ($prop in $matcherConfig.PSObject.Properties) {
+            if ($prop.Name -in @("type", "temporal_overlap", "cross_camera_same_timestamp")) { continue }
+            $colmapArgs += "--$($prop.Name)=$($prop.Value)"
+        }
 
-    & $colmapBin $colmapArgs
-    $exitCode = $LASTEXITCODE
+        Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
 
-    if ($exitCode -ne 0) {
-        Write-Host "ERROR: Feature matching failed with exit code: $exitCode" -ForegroundColor Red
-        return $false
+        & $colmapBin $colmapArgs
+        $exitCode = $LASTEXITCODE
+
+        if ($exitCode -ne 0) {
+            Write-Host "ERROR: Feature matching failed with exit code: $exitCode" -ForegroundColor Red
+            return $false
+        }
     }
 
     Write-Host "Feature matching completed successfully" -ForegroundColor Green
@@ -333,6 +378,9 @@ function Run-ColmapPipeline {
     .PARAMETER MatcherType
     Type of matcher to use
 
+    .PARAMETER MatchPairsPath
+    Path to match_pairs.txt file (required for custom_pairs matcher)
+
     .OUTPUTS
     Returns the sparse reconstruction path on success, $null on failure
     #>
@@ -347,8 +395,11 @@ function Run-ColmapPipeline {
         [PSCustomObject]$Config,
 
         [Parameter(Mandatory=$false)]
-        [ValidateSet("exhaustive", "sequential")]
-        [string]$MatcherType = "exhaustive"
+        [ValidateSet("exhaustive", "sequential", "custom_pairs")]
+        [string]$MatcherType = "exhaustive",
+
+        [Parameter(Mandatory=$false)]
+        [string]$MatchPairsPath
     )
 
     $colmapExe = $Config.paths.colmap_exe
@@ -403,7 +454,16 @@ function Run-ColmapPipeline {
     }
 
     # Step 2: Feature Matching
-    $result = Run-ColmapMatching -ColmapExe $colmapExe -DatabasePath $databasePath -MatcherType $MatcherType -Config $Config
+    $matchingParams = @{
+        ColmapExe = $colmapExe
+        DatabasePath = $databasePath
+        MatcherType = $MatcherType
+        Config = $Config
+    }
+    if ($MatchPairsPath) {
+        $matchingParams.MatchPairsPath = $MatchPairsPath
+    }
+    $result = Run-ColmapMatching @matchingParams
     if (-not $result) {
         return $null
     }
@@ -488,7 +548,16 @@ function Get-ColmapStats {
 
 # Main execution when script is run directly
 if ($MyInvocation.InvocationName -ne '.') {
-    $result = Run-ColmapPipeline -ImageDir $ImageDir -OutputDir $OutputDir -Config $Config -MatcherType $MatcherType
+    $pipelineParams = @{
+        ImageDir = $ImageDir
+        OutputDir = $OutputDir
+        Config = $Config
+        MatcherType = $MatcherType
+    }
+    if ($MatchPairsPath) {
+        $pipelineParams.MatchPairsPath = $MatchPairsPath
+    }
+    $result = Run-ColmapPipeline @pipelineParams
     if ($result) {
         Write-Host "COLMAP processing completed successfully" -ForegroundColor Green
         exit 0

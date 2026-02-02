@@ -14,13 +14,19 @@
     "feature_extractor": {
       "ImageReader.single_camera_per_folder": 1,
       "ImageReader.camera_model": "OPENCV",
-      "SiftExtraction.max_num_features": 8192
+      "SiftExtraction.max_num_features": 8192,
+      "SiftExtraction.use_gpu": 1
     },
     "matcher": {
-      "type": "exhaustive"
+      "type": "custom_pairs",
+      "temporal_overlap": 10,
+      "cross_camera_same_timestamp": true,
+      "SiftMatching.use_gpu": 1
     },
     "mapper": {
-      "Mapper.ba_global_max_num_iterations": 50
+      "Mapper.ba_global_max_num_iterations": 50,
+      "Mapper.ba_global_function_tolerance": 0.0001,
+      "Mapper.ba_local_max_num_iterations": 15
     }
   },
   "postshot": {
