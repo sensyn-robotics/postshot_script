@@ -139,8 +139,9 @@ function Run-DualCameraPipeline {
         $_.Extension -in @(".mp4", ".MP4", ".mov", ".MOV", ".avi", ".AVI")
     }
 
-    $wVideos = $videos | Where-Object { $_.Name -match "_W\." }
-    $zVideos = $videos | Where-Object { $_.Name -match "_Z\." }
+    # Match both _W.MP4 and _W-002.MP4 naming patterns
+    $wVideos = $videos | Where-Object { $_.Name -match "_W[-.]" }
+    $zVideos = $videos | Where-Object { $_.Name -match "_Z[-.]" }
 
     if ($wVideos.Count -eq 0) {
         $result.Errors += "No Wide (_W) videos found"

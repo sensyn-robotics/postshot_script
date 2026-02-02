@@ -34,7 +34,7 @@ param(
     [switch]$CrossCameraSameTimestamp = $true,
 
     [Parameter(Mandatory=$false)]
-    [switch]$Verbose
+    [switch]$ShowDetails
 )
 
 function Get-FrameNumber {
@@ -258,7 +258,7 @@ Write-Host ""
 Write-Host "  Exhaustive would be: $exhaustivePairs pairs" -ForegroundColor Gray
 Write-Host "  Reduction: $reduction%" -ForegroundColor Gray
 
-if ($Verbose) {
+if ($ShowDetails) {
     Write-Host ""
     Write-Host "Sample pairs:" -ForegroundColor Gray
     $allPairs | Select-Object -First 10 | ForEach-Object {
