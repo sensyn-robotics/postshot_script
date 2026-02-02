@@ -244,7 +244,9 @@ if (-not (Test-Path $outputDir)) {
     New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 }
 
-Set-Content -Path $OutputPath -Value ($allPairs -join "`n") -Encoding UTF8
+# Write UTF-8 without BOM (PowerShell's -Encoding UTF8 adds BOM which COLMAP can't handle)
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText($OutputPath, ($allPairs -join "`n"), $utf8NoBom)
 
 $totalPairs = $allPairs.Count
 Write-Host ""
