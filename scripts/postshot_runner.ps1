@@ -176,7 +176,8 @@ function Run-PostshotTrain {
         $cmdDisplay += " -o `"$OutputPath`""
         Write-Host "Command: $cmdDisplay" -ForegroundColor DarkGray
 
-        & $postshotCli $CliArgs
+        # Capture output to prevent it from becoming part of function return value
+        $null = & $postshotCli $CliArgs 2>&1
 
         if ($LASTEXITCODE -ne 0) {
             Write-Host "ERROR: Postshot training failed with exit code: $LASTEXITCODE" -ForegroundColor Red
@@ -271,7 +272,8 @@ function Run-PostshotExport {
         Write-Host "Starting Postshot CLI export..." -ForegroundColor Yellow
         Write-Host "Command: $postshotCli --login $($Cred.UserName) --password [REDACTED] export -f `"$InputPsht`" --export-splat `"$OutputPly`"" -ForegroundColor DarkGray
 
-        & $postshotCli $CliArgs
+        # Capture output to prevent it from becoming part of function return value
+        $null = & $postshotCli $CliArgs 2>&1
 
         if ($LASTEXITCODE -ne 0) {
             Write-Host "ERROR: Postshot export failed with exit code: $LASTEXITCODE" -ForegroundColor Red
