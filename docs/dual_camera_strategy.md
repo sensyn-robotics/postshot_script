@@ -51,19 +51,24 @@ Z<->Z temporal (matching within Zoom camera):
   ...
   Same logic for zoom camera
 
-W<->Z same-timestamp (cross-camera tie):
-  W_001 <-> Z_001  (both taken at timestamp T1)
-  W_002 <-> Z_002  (both taken at timestamp T2)
+W<->Z cross-camera (with temporal neighbors):
+  W_001 <-> Z_001, Z_002, ..., Z_006  (same + 5 neighbors)
+  W_002 <-> Z_001, Z_002, Z_003, ..., Z_007
   ...
-  Connects W and Z models together
+  Connects W and Z models with strong overlap
 ```
+
+**Important**: Cross-camera matching needs temporal neighbors, not just same-timestamp pairs.
+Same-timestamp-only matching (W_t <-> Z_t) provides too few connections (~5% of pairs) for
+COLMAP to reliably merge Wide and Zoom reconstructions. With temporal neighbors
+(CrossCameraTemporalOverlap=5), cross-camera pairs increase to ~35% of total pairs.
 
 ### Why This Helps Convergence
 
 - Avoids `W_001 <-> Z_250` (far apart, different scale, bad matches)
-- Only allows W<->Z pairs that see the exact same scene (same timestamp)
+- Cross-camera temporal neighbors provide enough matches for model merging
 - Bundle adjustment gets cleaner input data
-- Much faster than exhaustive (~10,000 pairs vs 250,000)
+- Much faster than exhaustive (~8,000 pairs vs 250,000)
 
 ## Implementation
 
@@ -98,19 +103,23 @@ Each line contains two image paths (relative to the images root directory).
     "feature_extractor": {
       "ImageReader.single_camera_per_folder": 1,
       "ImageReader.camera_model": "OPENCV",
-      "SiftExtraction.max_num_features": 8192,
-      "SiftExtraction.use_gpu": 1
+      "SiftExtraction.max_num_features": 8192
     },
     "matcher": {
       "type": "custom_pairs",
       "temporal_overlap": 10,
-      "cross_camera_same_timestamp": true,
-      "SiftMatching.use_gpu": 1
+      "cross_camera_temporal_overlap": 5,
+      "cross_camera_same_timestamp": true
     },
     "mapper": {
       "Mapper.ba_global_max_num_iterations": 50,
       "Mapper.ba_global_function_tolerance": 1e-4,
-      "Mapper.ba_local_max_num_iterations": 15
+      "Mapper.ba_local_max_num_iterations": 15,
+      "Mapper.multiple_models": 1,
+      "Mapper.init_min_num_inliers": 50,
+      "Mapper.abs_pose_min_num_inliers": 15,
+      "Mapper.abs_pose_min_inlier_ratio": 0.15,
+      "Mapper.min_model_size": 50
     }
   }
 }
@@ -121,7 +130,46 @@ Each line contains two image paths (relative to the images root directory).
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `temporal_overlap` | 10 | How many neighboring frames to match within each camera |
-| `cross_camera_same_timestamp` | true | Whether to match W<->Z at same timestamps |
+| `cross_camera_temporal_overlap` | 5 | W<->Z matching includes timestamps ±5 from each W frame |
+| `cross_camera_same_timestamp` | true | Whether to enable cross-camera matching |
+
+### Mapper Parameters for Model Merging
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `Mapper.multiple_models` | 1 | Allow multiple models if merging fails |
+| `Mapper.init_min_num_inliers` | 50 | Minimum inliers for initial pair (lower = easier init) |
+| `Mapper.abs_pose_min_num_inliers` | 15 | Minimum inliers for pose estimation (lower = register more images) |
+| `Mapper.abs_pose_min_inlier_ratio` | 0.15 | Minimum inlier ratio for pose (lower = more lenient) |
+| `Mapper.min_model_size` | 50 | Discard models with fewer than 50 images |
+
+## Multiple Reconstructions
+
+COLMAP mapper may create multiple reconstruction folders (0, 1, 2, ...) when it cannot
+merge all images into a single unified model. This typically happens when:
+
+1. **Insufficient cross-camera connections**: Not enough W<->Z feature matches
+2. **Large scene gaps**: Images from different parts of the scene don't connect
+3. **Feature matching failures**: Cross-camera scale differences cause poor matches
+
+### Automatic Largest Model Selection
+
+The pipeline automatically selects the largest reconstruction (by number of registered
+images) to pass to Postshot. This is determined by the size of `images.bin`:
+
+```powershell
+# Get-LargestReconstruction in colmap_processor.ps1
+# Finds the reconstruction folder with largest images.bin file
+```
+
+### Troubleshooting Multiple Models
+
+If COLMAP creates many separate models:
+
+1. **Increase cross-camera matching**: Set `cross_camera_temporal_overlap` higher (e.g., 10)
+2. **Lower mapper thresholds**: Reduce `init_min_num_inliers` and `abs_pose_min_num_inliers`
+3. **Check feature quality**: Ensure sufficient features are extracted (8192 recommended)
+4. **Verify timestamp alignment**: W and Z frames should be from same recording time
 
 ## Verification
 

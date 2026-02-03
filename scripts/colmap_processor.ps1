@@ -403,28 +403,39 @@ function Run-ColmapMapper {
         return $false
     }
 
-    # Check if reconstruction was successful (sparse/0 should exist)
-    $sparseDir = Join-Path $OutputPath "0"
-    if (-not (Test-Path $sparseDir)) {
-        Write-Host "ERROR: No reconstruction created (sparse/0 not found)" -ForegroundColor Red
+    # Check if at least one reconstruction was created (any numbered folder)
+    $reconFolders = Get-ChildItem -LiteralPath $OutputPath -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d+$' }
+    if ($reconFolders.Count -eq 0) {
+        Write-Host "ERROR: No reconstruction created in: $OutputPath" -ForegroundColor Red
         return $false
     }
 
-    # Verify required files exist
-    $requiredFiles = @("cameras.bin", "images.bin", "points3D.bin")
-    $allFilesExist = $true
+    Write-Host "  Created $($reconFolders.Count) reconstruction folder(s)" -ForegroundColor Yellow
 
-    foreach ($file in $requiredFiles) {
-        $filePath = Join-Path $sparseDir $file
-        if (-not (Test-Path $filePath)) {
-            Write-Host "ERROR: Required file not found: $file" -ForegroundColor Red
-            $allFilesExist = $false
+    # Verify required files exist in at least one reconstruction
+    $requiredFiles = @("cameras.bin", "images.bin", "points3D.bin")
+    $validRecons = 0
+
+    foreach ($recon in $reconFolders) {
+        $allFilesExist = $true
+        foreach ($file in $requiredFiles) {
+            $filePath = Join-Path $recon.FullName $file
+            if (-not (Test-Path -LiteralPath $filePath)) {
+                $allFilesExist = $false
+                break
+            }
+        }
+        if ($allFilesExist) {
+            $validRecons++
         }
     }
 
-    if (-not $allFilesExist) {
+    if ($validRecons -eq 0) {
+        Write-Host "ERROR: No valid reconstruction with required files found" -ForegroundColor Red
         return $false
     }
+
+    Write-Host "  Valid reconstructions: $validRecons" -ForegroundColor Yellow
 
     Write-Host "Sparse reconstruction completed successfully" -ForegroundColor Green
     return $true

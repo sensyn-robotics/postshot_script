@@ -4,7 +4,9 @@
 # Creates three types of pairs:
 #   1. W<->W temporal: Wide camera frames matched to neighboring frames
 #   2. Z<->Z temporal: Zoom camera frames matched to neighboring frames
-#   3. W<->Z same-timestamp: Cross-camera matches at same frame numbers
+#   3. W<->Z cross-camera: Cross-camera matches with temporal neighbors
+#      - For each W frame, match with Z frames at same and nearby timestamps
+#      - This creates strong connections between Wide and Zoom reconstructions
 #
 # Usage:
 #   .\generate_match_pairs.ps1 -ImagesDir "C:\data\images" -OutputPath "C:\data\match_pairs.txt"
@@ -29,6 +31,9 @@ param(
 
     [Parameter(Mandatory=$false)]
     [int]$TemporalOverlap = 10,
+
+    [Parameter(Mandatory=$false)]
+    [int]$CrossCameraTemporalOverlap = 5,
 
     [Parameter(Mandatory=$false)]
     [switch]$CrossCameraSameTimestamp = $true,
@@ -105,7 +110,12 @@ function Generate-TemporalPairs {
 function Generate-CrossCameraPairs {
     <#
     .SYNOPSIS
-    Generate cross-camera pairs for same timestamps
+    Generate cross-camera pairs with temporal neighbors
+
+    .DESCRIPTION
+    For each Wide image, match with Zoom images at same and nearby timestamps.
+    This creates strong connections between Wide and Zoom reconstructions,
+    which is essential for COLMAP to merge them into a single model.
 
     .PARAMETER WImages
     Array of Wide camera image file objects
@@ -118,6 +128,10 @@ function Generate-CrossCameraPairs {
 
     .PARAMETER ZSubfolder
     Subfolder name for Zoom images
+
+    .PARAMETER TemporalOverlap
+    Number of temporal neighbors to include (both directions)
+    E.g., 5 means W_t matches Z_{t-5}...Z_{t+5}
 
     .OUTPUTS
     Array of pair strings
@@ -133,28 +147,48 @@ function Generate-CrossCameraPairs {
         [string]$WSubfolder,
 
         [Parameter(Mandatory=$true)]
-        [string]$ZSubfolder
+        [string]$ZSubfolder,
+
+        [Parameter(Mandatory=$false)]
+        [int]$TemporalOverlap = 5
     )
 
     $pairs = @()
+    $pairSet = @{}  # Track unique pairs to avoid duplicates
 
     # Build lookup table for Z images by frame number
     $zByFrame = @{}
+    $zFrameNumbers = @()
     foreach ($zImg in $ZImages) {
         $frameNum = Get-FrameNumber -FileName $zImg.Name
         if ($frameNum -ge 0) {
             $zByFrame[$frameNum] = $zImg
+            $zFrameNumbers += $frameNum
         }
     }
+    $zFrameNumbers = $zFrameNumbers | Sort-Object
 
-    # Match W images to corresponding Z images
+    # Match W images to Z images at same and nearby timestamps
     foreach ($wImg in $WImages) {
-        $frameNum = Get-FrameNumber -FileName $wImg.Name
-        if ($frameNum -ge 0 -and $zByFrame.ContainsKey($frameNum)) {
-            $zImg = $zByFrame[$frameNum]
-            $wPath = "$WSubfolder/$($wImg.Name)"
-            $zPath = "$ZSubfolder/$($zImg.Name)"
-            $pairs += "$wPath $zPath"
+        $wFrameNum = Get-FrameNumber -FileName $wImg.Name
+        if ($wFrameNum -lt 0) { continue }
+
+        $wPath = "$WSubfolder/$($wImg.Name)"
+
+        # Match with Z frames in range [wFrameNum - TemporalOverlap, wFrameNum + TemporalOverlap]
+        for ($offset = -$TemporalOverlap; $offset -le $TemporalOverlap; $offset++) {
+            $zFrameNum = $wFrameNum + $offset
+            if ($zByFrame.ContainsKey($zFrameNum)) {
+                $zImg = $zByFrame[$zFrameNum]
+                $zPath = "$ZSubfolder/$($zImg.Name)"
+
+                # Create unique key to avoid duplicates
+                $pairKey = "$wPath|$zPath"
+                if (-not $pairSet.ContainsKey($pairKey)) {
+                    $pairSet[$pairKey] = $true
+                    $pairs += "$wPath $zPath"
+                }
+            }
         }
     }
 
@@ -167,8 +201,9 @@ Write-Host ""
 Write-Host "=== Generate Match Pairs ===" -ForegroundColor Cyan
 Write-Host "  Images directory: $ImagesDir" -ForegroundColor Gray
 Write-Host "  Output: $OutputPath" -ForegroundColor Gray
-Write-Host "  Temporal overlap: $TemporalOverlap" -ForegroundColor Gray
-Write-Host "  Cross-camera same-timestamp: $CrossCameraSameTimestamp" -ForegroundColor Gray
+Write-Host "  Temporal overlap (intra-camera): $TemporalOverlap" -ForegroundColor Gray
+Write-Host "  Cross-camera temporal overlap: $CrossCameraTemporalOverlap" -ForegroundColor Gray
+Write-Host "  Cross-camera matching: $CrossCameraSameTimestamp" -ForegroundColor Gray
 
 # Validate images directory
 if (-not (Test-Path $ImagesDir)) {
@@ -227,10 +262,10 @@ $zPairs = Generate-TemporalPairs -Images $zImages -SubfolderName $zSubfolder -Ov
 $allPairs += $zPairs
 Write-Host "    Generated $($zPairs.Count) Z<->Z pairs" -ForegroundColor Gray
 
-# Generate W<->Z cross-camera pairs
+# Generate W<->Z cross-camera pairs with temporal neighbors
 if ($CrossCameraSameTimestamp) {
-    Write-Host "  Generating W<->Z cross-camera pairs..." -ForegroundColor Gray
-    $crossPairs = Generate-CrossCameraPairs -WImages $wImages -ZImages $zImages -WSubfolder $wSubfolder -ZSubfolder $zSubfolder
+    Write-Host "  Generating W<->Z cross-camera pairs (temporal overlap: $CrossCameraTemporalOverlap)..." -ForegroundColor Gray
+    $crossPairs = Generate-CrossCameraPairs -WImages $wImages -ZImages $zImages -WSubfolder $wSubfolder -ZSubfolder $zSubfolder -TemporalOverlap $CrossCameraTemporalOverlap
     $allPairs += $crossPairs
     Write-Host "    Generated $($crossPairs.Count) W<->Z pairs" -ForegroundColor Gray
 }
