@@ -543,12 +543,83 @@ function Run-ColmapPipeline {
         return $null
     }
 
-    $sparseResultPath = Join-Path $sparsePath "0"
+    # Find the largest reconstruction (by images.bin size)
+    $sparseResultPath = Get-LargestReconstruction -SparsePath $sparsePath
+    if (-not $sparseResultPath) {
+        Write-Host "ERROR: No valid reconstruction found in: $sparsePath" -ForegroundColor Red
+        return $null
+    }
+
     Write-Host ""
     Write-Host "COLMAP pipeline completed successfully!" -ForegroundColor Green
     Write-Host "Sparse reconstruction: $sparseResultPath" -ForegroundColor Green
 
     return $sparseResultPath
+}
+
+function Get-LargestReconstruction {
+    <#
+    .SYNOPSIS
+    Find the largest COLMAP reconstruction folder by images.bin size
+
+    .DESCRIPTION
+    COLMAP mapper may create multiple reconstruction folders (0, 1, 2, ...) when it
+    cannot merge all images into a single model. This function finds the folder with
+    the largest images.bin file, which indicates the most registered images.
+
+    .PARAMETER SparsePath
+    Path to the sparse directory containing reconstruction folders (0, 1, 2, ...)
+
+    .OUTPUTS
+    Full path to the largest reconstruction folder, or $null if none found
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$SparsePath
+    )
+
+    if (-not (Test-Path -LiteralPath $SparsePath)) {
+        Write-Host "WARNING: Sparse path does not exist: $SparsePath" -ForegroundColor Yellow
+        return $null
+    }
+
+    # Get all numbered reconstruction folders
+    $reconFolders = Get-ChildItem -LiteralPath $SparsePath -Directory | Where-Object {
+        $_.Name -match '^\d+$'
+    }
+
+    if ($reconFolders.Count -eq 0) {
+        Write-Host "WARNING: No reconstruction folders found in: $SparsePath" -ForegroundColor Yellow
+        return $null
+    }
+
+    Write-Host ""
+    Write-Host "=== Finding largest reconstruction ===" -ForegroundColor Cyan
+    Write-Host "Found $($reconFolders.Count) reconstruction folder(s)" -ForegroundColor Yellow
+
+    # Find the folder with the largest images.bin
+    $largest = $null
+    $largestSize = 0
+
+    foreach ($folder in $reconFolders) {
+        $imagesBin = Join-Path $folder.FullName "images.bin"
+        if (Test-Path -LiteralPath $imagesBin) {
+            $size = (Get-Item -LiteralPath $imagesBin).Length
+            Write-Host "  Reconstruction $($folder.Name): images.bin = $size bytes" -ForegroundColor Gray
+            if ($size -gt $largestSize) {
+                $largestSize = $size
+                $largest = $folder
+            }
+        }
+    }
+
+    if (-not $largest) {
+        Write-Host "WARNING: No valid reconstruction with images.bin found" -ForegroundColor Yellow
+        return $null
+    }
+
+    Write-Host "Selected reconstruction: $($largest.Name) (largest with $largestSize bytes)" -ForegroundColor Green
+    return $largest.FullName
 }
 
 function Get-ColmapStats {

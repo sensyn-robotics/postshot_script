@@ -252,14 +252,15 @@ function Run-FullPipeline {
             $result.ProjectPath = $InputPath
 
             # Check if it's colmap_output structure or sparse structure
-            $colmapOutputSparse = Join-Path $InputPath "colmap_output\sparse\0"
-            $directSparse = Join-Path $InputPath "sparse\0"
+            # Find the largest reconstruction folder (by images.bin size)
+            $colmapOutputSparseDir = Join-Path $InputPath "colmap_output\sparse"
+            $directSparseDir = Join-Path $InputPath "sparse"
 
-            if (Test-Path $colmapOutputSparse) {
-                $paths.Sparse = $colmapOutputSparse
+            if (Test-Path $colmapOutputSparseDir) {
+                $paths.Sparse = Get-LargestReconstruction -SparsePath $colmapOutputSparseDir
             }
-            elseif (Test-Path $directSparse) {
-                $paths.Sparse = $directSparse
+            elseif (Test-Path $directSparseDir) {
+                $paths.Sparse = Get-LargestReconstruction -SparsePath $directSparseDir
             }
 
             Write-Host "--- Stage 1: Frame Extraction ---" -ForegroundColor Yellow

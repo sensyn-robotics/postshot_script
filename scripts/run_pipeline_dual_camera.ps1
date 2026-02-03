@@ -245,14 +245,14 @@ function Run-DualCameraPipeline {
     Write-Host ""
     Write-Host "--- Stage 4: Postshot Training ---" -ForegroundColor Yellow
     Write-Host "  Images: $($paths.Images)" -ForegroundColor Cyan
-    Write-Host "  COLMAP sparse: $($paths.Sparse)\0" -ForegroundColor Cyan
+    Write-Host "  COLMAP sparse: $colmapResult" -ForegroundColor Cyan
 
     $postshotResult = Run-PostshotPipeline `
         -InputPath $paths.Images `
         -OutputPath $paths.Psht `
         -Config $Config `
         -ExportPly $Config.postshot.export_ply `
-        -ColmapSparsePath "$($paths.Sparse)\0"
+        -ColmapSparsePath $colmapResult
 
     if (-not $postshotResult.Success) {
         $result.Errors += "Postshot training failed"

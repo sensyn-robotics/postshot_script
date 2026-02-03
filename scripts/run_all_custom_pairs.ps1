@@ -93,13 +93,20 @@ for ($i = 0; $i -lt $scenes.Count; $i++) {
         # Check results
         $pshtPath = Join-Path $outputDir "scene.psht"
         $plyPath = Join-Path $outputDir "scene.ply"
-        $sparsePath = Join-Path $outputDir "colmap_output\sparse\0"
+        $sparseDir = Join-Path $outputDir "colmap_output\sparse"
+
+        # Check if any sparse reconstruction exists (0, 1, 2, ...)
+        $hasSparse = $false
+        if (Test-Path -LiteralPath $sparseDir) {
+            $reconFolders = Get-ChildItem -LiteralPath $sparseDir -Directory | Where-Object { $_.Name -match '^\d+$' }
+            $hasSparse = ($reconFolders.Count -gt 0)
+        }
 
         $result = [PSCustomObject]@{
             Scene = $sceneName
             Success = ($exitCode -eq 0)
             Duration = $sceneDuration.ToString('hh\:mm\:ss')
-            HasSparse = (Test-Path $sparsePath)
+            HasSparse = $hasSparse
             HasPsht = (Test-Path $pshtPath)
             HasPly = (Test-Path $plyPath)
         }
