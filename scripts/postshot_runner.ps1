@@ -77,6 +77,42 @@ function Get-PostshotCredentials {
     }
 }
 
+function Invoke-PostshotWithUtf8 {
+    <#
+    .SYNOPSIS
+    Execute Postshot CLI with proper UTF-8 encoding for Unicode paths
+
+    .PARAMETER PostshotExe
+    Path to Postshot CLI executable
+
+    .PARAMETER Arguments
+    Array of arguments to pass to Postshot CLI
+
+    .OUTPUTS
+    Exit code from the process
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$PostshotExe,
+
+        [Parameter(Mandatory=$true)]
+        [array]$Arguments
+    )
+
+    try {
+        # Use Start-Process to properly handle Unicode paths
+        $process = Start-Process -FilePath $PostshotExe `
+            -ArgumentList $Arguments `
+            -NoNewWindow -Wait -PassThru
+
+        return $process.ExitCode
+    }
+    catch {
+        Write-Host "ERROR: Failed to execute Postshot CLI: $_" -ForegroundColor Red
+        return 1
+    }
+}
+
 function Run-PostshotTrain {
     <#
     .SYNOPSIS
@@ -153,20 +189,21 @@ function Run-PostshotTrain {
     $PlainTextPassword = $MarshalType::PtrToStringAuto($BSTR)
 
     try {
+        # Build argument list - use proper quoting for paths with spaces/unicode
         $CliArgs = @(
             '--login', $Cred.UserName,
             '--password', $PlainTextPassword,
             'train',
-            '-i', $InputPath
+            '-i', "`"$InputPath`""
         )
 
         # Add COLMAP sparse path for camera poses and point initialization
         if ($ColmapSparsePath -and (Test-Path $ColmapSparsePath)) {
-            $CliArgs += @('-i', $ColmapSparsePath)
+            $CliArgs += @('-i', "`"$ColmapSparsePath`"")
             Write-Host "  Using COLMAP sparse for initialization: $ColmapSparsePath" -ForegroundColor Cyan
         }
 
-        $CliArgs += @('-o', $OutputPath)
+        $CliArgs += @('-o', "`"$OutputPath`"")
 
         Write-Host "Starting Postshot CLI training..." -ForegroundColor Yellow
         $cmdDisplay = "$postshotCli --login $($Cred.UserName) --password [REDACTED] train -i `"$InputPath`""
@@ -176,11 +213,11 @@ function Run-PostshotTrain {
         $cmdDisplay += " -o `"$OutputPath`""
         Write-Host "Command: $cmdDisplay" -ForegroundColor DarkGray
 
-        # Capture output to prevent it from becoming part of function return value
-        $null = & $postshotCli $CliArgs 2>&1
+        # Use Start-Process to properly handle Unicode paths
+        $exitCode = Invoke-PostshotWithUtf8 -PostshotExe $postshotCli -Arguments $CliArgs
 
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "ERROR: Postshot training failed with exit code: $LASTEXITCODE" -ForegroundColor Red
+        if ($exitCode -ne 0) {
+            Write-Host "ERROR: Postshot training failed with exit code: $exitCode" -ForegroundColor Red
             return $null
         }
 
@@ -261,22 +298,23 @@ function Run-PostshotExport {
 
     try {
         # Postshot CLI export uses -f for input and --export-splat for PLY output
+        # Use proper quoting for paths with spaces/unicode
         $CliArgs = @(
             '--login', $Cred.UserName,
             '--password', $PlainTextPassword,
             'export',
-            '-f', $InputPsht,
-            '--export-splat', $OutputPly
+            '-f', "`"$InputPsht`"",
+            '--export-splat', "`"$OutputPly`""
         )
 
         Write-Host "Starting Postshot CLI export..." -ForegroundColor Yellow
         Write-Host "Command: $postshotCli --login $($Cred.UserName) --password [REDACTED] export -f `"$InputPsht`" --export-splat `"$OutputPly`"" -ForegroundColor DarkGray
 
-        # Capture output to prevent it from becoming part of function return value
-        $null = & $postshotCli $CliArgs 2>&1
+        # Use Start-Process to properly handle Unicode paths
+        $exitCode = Invoke-PostshotWithUtf8 -PostshotExe $postshotCli -Arguments $CliArgs
 
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "ERROR: Postshot export failed with exit code: $LASTEXITCODE" -ForegroundColor Red
+        if ($exitCode -ne 0) {
+            Write-Host "ERROR: Postshot export failed with exit code: $exitCode" -ForegroundColor Red
             return $null
         }
 

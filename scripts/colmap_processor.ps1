@@ -25,6 +25,79 @@ param(
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path (Split-Path -Parent $scriptDir) "lib\config_loader.ps1")
 
+function Get-ShortPath {
+    <#
+    .SYNOPSIS
+    Convert a path to its short (8.3) format to avoid Unicode issues with external commands
+    Note: On Windows, 8.3 names may still contain Unicode characters if the folder name starts with Unicode.
+
+    .PARAMETER LongPath
+    The long path to convert
+
+    .OUTPUTS
+    The short path if available, otherwise the original path
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$LongPath
+    )
+
+    if (-not (Test-Path $LongPath)) {
+        return $LongPath
+    }
+
+    try {
+        $fso = New-Object -ComObject Scripting.FileSystemObject
+        $item = Get-Item -LiteralPath $LongPath
+        if ($item.PSIsContainer) {
+            $shortPath = $fso.GetFolder($LongPath).ShortPath
+        } else {
+            $shortPath = $fso.GetFile($LongPath).ShortPath
+        }
+        return $shortPath
+    }
+    catch {
+        Write-Host "WARNING: Could not get short path for: $LongPath" -ForegroundColor Yellow
+        return $LongPath
+    }
+}
+
+function Invoke-ColmapWithUtf8 {
+    <#
+    .SYNOPSIS
+    Run COLMAP command with proper Unicode path handling using Start-Process
+
+    .PARAMETER ColmapExe
+    Path to COLMAP executable
+
+    .PARAMETER Arguments
+    Array of arguments to pass to COLMAP
+
+    .OUTPUTS
+    Exit code from COLMAP
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$ColmapExe,
+
+        [Parameter(Mandatory=$true)]
+        [array]$Arguments
+    )
+
+    try {
+        # Use Start-Process which handles Unicode paths better than call operator
+        $process = Start-Process -FilePath $ColmapExe `
+            -ArgumentList $Arguments `
+            -NoNewWindow -Wait -PassThru
+
+        return $process.ExitCode
+    }
+    catch {
+        Write-Host "ERROR: Failed to execute COLMAP: $_" -ForegroundColor Red
+        return 1
+    }
+}
+
 function Setup-ColmapEnvironment {
     <#
     .SYNOPSIS
@@ -114,9 +187,8 @@ function Run-ColmapFeatureExtraction {
     Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
     Write-Host "  single_camera_per_folder: $($featureConfig.'ImageReader.single_camera_per_folder')" -ForegroundColor Yellow
 
-    # Use call operator to run in current environment (inherits PATH changes)
-    & $colmapBin $colmapArgs
-    $exitCode = $LASTEXITCODE
+    # Use UTF-8 encoding wrapper to handle Unicode paths
+    $exitCode = Invoke-ColmapWithUtf8 -ColmapExe $colmapBin -Arguments $colmapArgs
 
     if ($exitCode -ne 0) {
         Write-Host "ERROR: Feature extraction failed with exit code: $exitCode" -ForegroundColor Red
@@ -210,8 +282,8 @@ function Run-ColmapMatching {
         Write-Host "  Using custom pairs from: $MatchPairsPath" -ForegroundColor Yellow
         Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
 
-        & $colmapBin $colmapArgs
-        $exitCode = $LASTEXITCODE
+        # Use UTF-8 encoding wrapper to handle Unicode paths
+        $exitCode = Invoke-ColmapWithUtf8 -ColmapExe $colmapBin -Arguments $colmapArgs
 
         if ($exitCode -ne 0) {
             Write-Host "ERROR: matches_importer failed with exit code: $exitCode" -ForegroundColor Red
@@ -234,8 +306,8 @@ function Run-ColmapMatching {
 
         Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
 
-        & $colmapBin $colmapArgs
-        $exitCode = $LASTEXITCODE
+        # Use UTF-8 encoding wrapper to handle Unicode paths
+        $exitCode = Invoke-ColmapWithUtf8 -ColmapExe $colmapBin -Arguments $colmapArgs
 
         if ($exitCode -ne 0) {
             Write-Host "ERROR: Feature matching failed with exit code: $exitCode" -ForegroundColor Red
@@ -323,8 +395,8 @@ function Run-ColmapMapper {
 
     Write-Host "Running: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
 
-    & $colmapBin $colmapArgs
-    $exitCode = $LASTEXITCODE
+    # Use UTF-8 encoding wrapper to handle Unicode paths
+    $exitCode = Invoke-ColmapWithUtf8 -ColmapExe $colmapBin -Arguments $colmapArgs
 
     if ($exitCode -ne 0) {
         Write-Host "ERROR: Mapper failed with exit code: $exitCode" -ForegroundColor Red
