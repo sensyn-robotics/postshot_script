@@ -6,7 +6,7 @@
     "temp_directory": "C:\\Postshot_Temp"
   },
   "video_extraction": {
-    "fps": 1,
+    "fps": 0.5,
     "output_format": "png",
     "quality": 2
   },

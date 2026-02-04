@@ -46,7 +46,10 @@ param(
     [string]$MatcherType = "custom_pairs",  # Custom pairs for dual-camera
 
     [Parameter(Mandatory=$false)]
-    [int]$TemporalOverlap = 10  # Neighbors to match within each camera
+    [int]$TemporalOverlap = 10,  # Neighbors to match within each camera
+
+    [Parameter(Mandatory=$false)]
+    [int]$VisualizationIntervalMinutes = 10  # Interval for periodic visualization
 )
 
 # Get script directory
@@ -86,6 +89,32 @@ function Get-DualCameraProjectPaths {
         Sparse = Join-Path $outputDir "colmap_output\sparse"
         Psht = Join-Path $outputDir "scene.psht"
         Ply = Join-Path $outputDir "scene.ply"
+        Visualizations = Join-Path $outputDir "visualizations"
+    }
+}
+
+function Save-Visualization {
+    param(
+        [string]$Type,
+        [string]$SourcePath,
+        [string]$OutputDir,
+        [int]$StepNumber
+    )
+
+    if (-not (Test-Path $OutputDir)) {
+        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+    }
+
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $outputFile = Join-Path $OutputDir "${Type}_step${StepNumber}_${timestamp}.png"
+
+    Write-Host "  Saving visualization: $outputFile" -ForegroundColor Gray
+
+    if ($Type -eq "colmap") {
+        & (Join-Path $scriptDir "visualize_colmap.ps1") -SparsePath $SourcePath -OutputImage $outputFile
+    }
+    elseif ($Type -eq "postshot") {
+        & (Join-Path $scriptDir "visualize_postshot.ps1") -PshtPath $SourcePath -OutputImage $outputFile
     }
 }
 
@@ -106,7 +135,10 @@ function Run-DualCameraPipeline {
         [string]$MatcherType = "custom_pairs",
 
         [Parameter(Mandatory=$false)]
-        [int]$TemporalOverlap = 10
+        [int]$TemporalOverlap = 10,
+
+        [Parameter(Mandatory=$false)]
+        [int]$VisualizationIntervalMinutes = 10
     )
 
     $result = [PSCustomObject]@{
@@ -135,7 +167,7 @@ function Run-DualCameraPipeline {
     Write-Host "--- Stage 1: Frame Extraction ---" -ForegroundColor Yellow
 
     # Find W and Z videos
-    $videos = Get-ChildItem -Path $InputPath -File | Where-Object {
+    $videos = Get-ChildItem -LiteralPath $InputPath -File | Where-Object {
         $_.Extension -in @(".mp4", ".MP4", ".mov", ".MOV", ".avi", ".AVI")
     }
 
@@ -241,6 +273,11 @@ function Run-DualCameraPipeline {
         return $result
     }
 
+    # Save COLMAP visualization
+    if (Test-Path $colmapResult) {
+        Save-Visualization -Type "colmap" -SourcePath $colmapResult -OutputDir $paths.Visualizations -StepNumber 1
+    }
+
     # === Stage 4: Postshot Training ===
     Write-Host ""
     Write-Host "--- Stage 4: Postshot Training ---" -ForegroundColor Yellow
@@ -261,6 +298,12 @@ function Run-DualCameraPipeline {
 
     $result.PshtPath = $postshotResult.PshtPath
     $result.PlyPath = $postshotResult.PlyPath
+
+    # Save final Postshot visualization
+    if ($postshotResult.PshtPath -and (Test-Path $postshotResult.PshtPath)) {
+        Save-Visualization -Type "postshot" -SourcePath $postshotResult.PshtPath -OutputDir $paths.Visualizations -StepNumber 99
+    }
+
     $result.Success = $true
 
     return $result
@@ -277,6 +320,7 @@ Write-Host "  Matcher: $MatcherType" -ForegroundColor Cyan
 if ($MatcherType -eq "custom_pairs") {
     Write-Host "  Temporal Overlap: $TemporalOverlap" -ForegroundColor Cyan
 }
+Write-Host "  Visualization interval: $VisualizationIntervalMinutes min" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor White
 
 # Load configuration
@@ -293,7 +337,7 @@ if (-not $configValid) {
 
 # Run the pipeline
 $startTime = Get-Date
-$result = Run-DualCameraPipeline -InputPath $InputPath -Config $Config -MatcherType $MatcherType -TemporalOverlap $TemporalOverlap
+$result = Run-DualCameraPipeline -InputPath $InputPath -Config $Config -MatcherType $MatcherType -TemporalOverlap $TemporalOverlap -VisualizationIntervalMinutes $VisualizationIntervalMinutes
 $endTime = Get-Date
 $duration = $endTime - $startTime
 
