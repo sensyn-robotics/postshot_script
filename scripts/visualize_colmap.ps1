@@ -40,7 +40,16 @@ Copy-Item -LiteralPath $SparsePath -Destination $tempSparse -Recurse
 $pythonScript = Join-Path $scriptDir "render_pointcloud.py"
 
 Write-Host "  Rendering point cloud..." -ForegroundColor Gray
-python $pythonScript $tempSparse $OutputImage --title "$Title"
+$pythonOutput = & python $pythonScript $tempSparse $OutputImage --title "$Title" 2>&1
+$pythonExitCode = $LASTEXITCODE
+
+if ($pythonExitCode -ne 0) {
+    Write-Host "ERROR: Python failed with exit code $pythonExitCode" -ForegroundColor Red
+    Write-Host "Python output: $pythonOutput" -ForegroundColor Red
+    # Cleanup before exit
+    Remove-Item $tempSparse -Recurse -Force -ErrorAction SilentlyContinue
+    exit 1
+}
 
 # Cleanup
 Remove-Item $tempSparse -Recurse -Force -ErrorAction SilentlyContinue

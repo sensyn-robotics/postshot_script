@@ -75,9 +75,13 @@ try {
         # Use Python to render the gaussian splats
         $pythonScript = Join-Path $scriptDir "render_pointcloud.py"
         Write-Host "  Rendering point cloud..." -ForegroundColor Gray
-        python $pythonScript $tempPly $OutputImage --title "$Title"
+        $pythonOutput = & python $pythonScript $tempPly $OutputImage --title "$Title" 2>&1
+        $pythonExitCode = $LASTEXITCODE
 
-        if (Test-Path $OutputImage) {
+        if ($pythonExitCode -ne 0) {
+            Write-Host "ERROR: Python rendering failed with exit code $pythonExitCode" -ForegroundColor Red
+            Write-Host "Python output: $pythonOutput" -ForegroundColor Red
+        } elseif (Test-Path $OutputImage) {
             Write-Host "  Visualization saved: $OutputImage" -ForegroundColor Green
         }
     } else {

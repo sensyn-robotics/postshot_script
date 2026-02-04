@@ -14,7 +14,10 @@ param(
     [string]$ConfigPath,
 
     [Parameter(Mandatory=$false)]
-    [int]$VisualizationIntervalMinutes = 10
+    [int]$VisualizationIntervalMinutes = 10,
+
+    [Parameter(Mandatory=$false)]
+    [string]$OutputDir = "output"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,9 +32,17 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # === HELPER FUNCTIONS ===
 
 function Get-ProjectPaths {
-    param([string]$BasePath)
+    param(
+        [string]$BasePath,
+        [string]$OutputDirName = "output"
+    )
 
-    $outputDir = Join-Path $BasePath "output"
+    # Handle empty string by using default
+    if ([string]::IsNullOrWhiteSpace($OutputDirName)) {
+        $OutputDirName = "output"
+    }
+
+    $outputDir = Join-Path $BasePath $OutputDirName
 
     return [PSCustomObject]@{
         Base = $BasePath
@@ -62,11 +73,31 @@ function Save-Visualization {
 
     Write-Host "  Saving visualization: $outputFile" -ForegroundColor Gray
 
-    if ($Type -eq "colmap") {
-        & (Join-Path $scriptDir "visualize_colmap.ps1") -SparsePath $SourcePath -OutputImage $outputFile
+    try {
+        if ($Type -eq "colmap") {
+            & (Join-Path $scriptDir "visualize_colmap.ps1") -SparsePath $SourcePath -OutputImage $outputFile
+        }
+        elseif ($Type -eq "postshot") {
+            & (Join-Path $scriptDir "visualize_postshot.ps1") -PshtPath $SourcePath -OutputImage $outputFile
+        }
+
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            Write-Host "WARNING: Visualization failed with exit code $exitCode" -ForegroundColor Yellow
+            return $false
+        }
+
+        if (Test-Path $outputFile) {
+            Write-Host "  Visualization saved successfully" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host "WARNING: Visualization output file not created" -ForegroundColor Yellow
+            return $false
+        }
     }
-    elseif ($Type -eq "postshot") {
-        & (Join-Path $scriptDir "visualize_postshot.ps1") -PshtPath $SourcePath -OutputImage $outputFile
+    catch {
+        Write-Host "WARNING: Visualization error: $_" -ForegroundColor Yellow
+        return $false
     }
 }
 
@@ -113,7 +144,10 @@ function Run-ExhaustivePipeline {
         [PSCustomObject]$Config,
 
         [Parameter(Mandatory=$false)]
-        [int]$VisualizationIntervalMinutes = 10
+        [int]$VisualizationIntervalMinutes = 10,
+
+        [Parameter(Mandatory=$false)]
+        [string]$OutputDirName = "output"
     )
 
     $result = [PSCustomObject]@{
@@ -141,7 +175,7 @@ function Run-ExhaustivePipeline {
     Write-Host "  Visualization interval: $VisualizationIntervalMinutes minutes" -ForegroundColor Gray
     Write-Host ""
 
-    $paths = Get-ProjectPaths -BasePath $InputPath
+    $paths = Get-ProjectPaths -BasePath $InputPath -OutputDirName $OutputDirName
     $result.ProjectPath = $InputPath
 
     # Create visualizations directory
@@ -253,9 +287,25 @@ function Run-ExhaustivePipeline {
         return $result
     }
 
-    # Step 2c: Mapper
+    # Step 2c: Mapper (with periodic visualization monitoring)
     Write-Host "  Running mapper..." -ForegroundColor Cyan
+
+    # Start visualization monitor before long-running mapper
+    $vizLogPath = Join-Path $paths.Visualizations "viz_monitor.log"
+    Add-Content -Path $vizLogPath -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Starting visualization monitor"
+    $vizMonitorJob = Start-VisualizationMonitor -Type "colmap" -WatchPath $sparsePath -OutputDir $paths.Visualizations -IntervalMinutes $VisualizationIntervalMinutes
+    Write-Host "  Visualization monitor started (interval: $VisualizationIntervalMinutes min)" -ForegroundColor Gray
+
     $mapperResult = Run-ColmapMapper -ColmapExe $colmapExe -DatabasePath $databasePath -ImagePath $paths.Images -OutputPath $sparsePath -Config $Config
+
+    # Stop visualization monitor
+    if ($vizMonitorJob) {
+        Stop-Job -Job $vizMonitorJob -ErrorAction SilentlyContinue
+        Remove-Job -Job $vizMonitorJob -Force -ErrorAction SilentlyContinue
+        Add-Content -Path $vizLogPath -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Visualization monitor stopped"
+        Write-Host "  Visualization monitor stopped" -ForegroundColor Gray
+    }
+
     if (-not $mapperResult) {
         $result.Errors += "Mapper failed"
         return $result
@@ -307,11 +357,17 @@ function Run-ExhaustivePipeline {
 
 # === MAIN EXECUTION ===
 
+# Ensure OutputDir has a valid value (handle empty string case)
+if ([string]::IsNullOrWhiteSpace($OutputDir)) {
+    $OutputDir = "output"
+}
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor White
 Write-Host "  Exhaustive Pipeline Runner" -ForegroundColor White
 Write-Host "========================================" -ForegroundColor White
 Write-Host "  Input: $InputPath" -ForegroundColor Cyan
+Write-Host "  Output directory: $OutputDir" -ForegroundColor Cyan
 Write-Host "  Visualization interval: $VisualizationIntervalMinutes min" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor White
 
@@ -327,9 +383,16 @@ if (-not $configValid) {
     exit 1
 }
 
+# Check Python dependencies for visualization
+$pythonDepsOk = Test-PythonDependencies
+if (-not $pythonDepsOk) {
+    Write-Host "`nWARNING: Some Python dependencies are missing for visualization." -ForegroundColor Yellow
+    Write-Host "  Visualizations may fail. Install with: pip install numpy pillow" -ForegroundColor Yellow
+}
+
 # Run the pipeline
 $startTime = Get-Date
-$result = Run-ExhaustivePipeline -InputPath $InputPath -Config $Config -VisualizationIntervalMinutes $VisualizationIntervalMinutes
+$result = Run-ExhaustivePipeline -InputPath $InputPath -Config $Config -VisualizationIntervalMinutes $VisualizationIntervalMinutes -OutputDirName $OutputDir
 $endTime = Get-Date
 $duration = $endTime - $startTime
 
@@ -355,7 +418,7 @@ if ($result.Success) {
     if ($result.PlyPath) {
         Write-Host "    PLY:  $($result.PlyPath)" -ForegroundColor Cyan
     }
-    Write-Host "    Visualizations: $(Join-Path $InputPath 'output\visualizations')" -ForegroundColor Cyan
+    Write-Host "    Visualizations: $(Join-Path $InputPath "$OutputDir\visualizations")" -ForegroundColor Cyan
 }
 
 Write-Host "========================================" -ForegroundColor White

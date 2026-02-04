@@ -167,4 +167,42 @@ function Get-ColmapArgs {
     return $args
 }
 
+function Test-PythonDependencies {
+    <#
+    .SYNOPSIS
+    Tests that required Python dependencies are available
+
+    .OUTPUTS
+    Boolean indicating if all dependencies are available
+    #>
+
+    $required = @("numpy", "PIL")
+    $allFound = $true
+
+    Write-Host "Checking Python dependencies..." -ForegroundColor Cyan
+
+    foreach ($module in $required) {
+        $importName = if ($module -eq "PIL") { "from PIL import Image" } else { "import $module" }
+        $testCode = "try:`n    $importName`n    print('OK')`nexcept ImportError:`n    print('MISSING')"
+
+        try {
+            $result = & python -c $testCode 2>$null
+            $exitCode = $LASTEXITCODE
+
+            if ($result -match "MISSING" -or $exitCode -ne 0) {
+                Write-Host "  MISSING: $module" -ForegroundColor Red
+                $allFound = $false
+            } else {
+                Write-Host "  OK: $module" -ForegroundColor Green
+            }
+        }
+        catch {
+            Write-Host "  MISSING: $module (Python error)" -ForegroundColor Red
+            $allFound = $false
+        }
+    }
+
+    return $allFound
+}
+
 # Functions are automatically available when dot-sourced

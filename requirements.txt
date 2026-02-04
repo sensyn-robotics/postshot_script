@@ -1,0 +1,12 @@
+# Python dependencies for postshot_script
+# Install with: pip install -r requirements.txt
+
+# Core dependencies
+numpy>=1.20.0
+pillow>=9.0.0
+
+# Computer vision for blur detection and optical flow
+opencv-python>=4.5.0
+
+# Matplotlib for visualization (optional, for point cloud rendering)
+matplotlib>=3.5.0
