@@ -162,43 +162,63 @@ function Run-ExhaustivePipeline {
 
     Write-Host "  Found $($wVideos.Count) Wide video(s), $($zVideos.Count) Zoom video(s)"
 
-    # Create images directory structure
+    # Check for existing images directory structure
     $wImagesDir = Join-Path $paths.Images "video_W"
     $zImagesDir = Join-Path $paths.Images "video_Z"
 
-    foreach ($dir in @($paths.Images, $wImagesDir, $zImagesDir)) {
-        if (-not (Test-Path $dir)) {
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
-        }
+    # Count existing frames
+    $existingWCount = 0
+    $existingZCount = 0
+    if (Test-Path -LiteralPath $wImagesDir) {
+        $existingWCount = (Get-ChildItem -LiteralPath $wImagesDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
+    }
+    if (Test-Path -LiteralPath $zImagesDir) {
+        $existingZCount = (Get-ChildItem -LiteralPath $zImagesDir -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
     }
 
-    # Extract W frames
-    foreach ($video in $wVideos) {
-        Write-Host "  Extracting W frames: $($video.Name)" -ForegroundColor Cyan
-        $extractResult = Extract-VideoFrames -VideoPath $video.FullName -OutputDir $wImagesDir -Config $Config
-        if (-not $extractResult) {
-            $result.Errors += "Failed to extract W frames from $($video.Name)"
-        }
+    # Skip extraction if frames already exist
+    if ($existingWCount -gt 0 -or $existingZCount -gt 0) {
+        Write-Host "  Found existing frames: $existingWCount Wide, $existingZCount Zoom" -ForegroundColor Green
+        Write-Host "  Skipping frame extraction (using existing images)" -ForegroundColor Yellow
+        $wCount = $existingWCount
+        $zCount = $existingZCount
     }
-
-    # Extract Z frames
-    foreach ($video in $zVideos) {
-        Write-Host "  Extracting Z frames: $($video.Name)" -ForegroundColor Cyan
-        $extractResult = Extract-VideoFrames -VideoPath $video.FullName -OutputDir $zImagesDir -Config $Config
-        if (-not $extractResult) {
-            $result.Errors += "Failed to extract Z frames from $($video.Name)"
+    else {
+        # Create directories and extract frames
+        foreach ($dir in @($paths.Images, $wImagesDir, $zImagesDir)) {
+            if (-not (Test-Path $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            }
         }
+
+        # Extract W frames
+        foreach ($video in $wVideos) {
+            Write-Host "  Extracting W frames: $($video.Name)" -ForegroundColor Cyan
+            $extractResult = Extract-VideoFrames -VideoPath $video.FullName -OutputDir $wImagesDir -Config $Config
+            if (-not $extractResult) {
+                $result.Errors += "Failed to extract W frames from $($video.Name)"
+            }
+        }
+
+        # Extract Z frames
+        foreach ($video in $zVideos) {
+            Write-Host "  Extracting Z frames: $($video.Name)" -ForegroundColor Cyan
+            $extractResult = Extract-VideoFrames -VideoPath $video.FullName -OutputDir $zImagesDir -Config $Config
+            if (-not $extractResult) {
+                $result.Errors += "Failed to extract Z frames from $($video.Name)"
+            }
+        }
+
+        # Count extracted frames
+        $wCount = (Get-ChildItem -LiteralPath $wImagesDir -File -ErrorAction SilentlyContinue).Count
+        $zCount = (Get-ChildItem -LiteralPath $zImagesDir -File -ErrorAction SilentlyContinue).Count
+        Write-Host "  Extracted: $wCount Wide frames, $zCount Zoom frames" -ForegroundColor Green
     }
 
     $result.ImagesPath = $paths.Images
 
-    # Count extracted frames
-    $wCount = (Get-ChildItem -LiteralPath $wImagesDir -File -ErrorAction SilentlyContinue).Count
-    $zCount = (Get-ChildItem -LiteralPath $zImagesDir -File -ErrorAction SilentlyContinue).Count
-    Write-Host "  Extracted: $wCount Wide frames, $zCount Zoom frames" -ForegroundColor Green
-
     if ($wCount -eq 0 -and $zCount -eq 0) {
-        $result.Errors += "No frames extracted"
+        $result.Errors += "No frames found"
         return $result
     }
 
