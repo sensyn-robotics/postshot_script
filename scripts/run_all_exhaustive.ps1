@@ -21,10 +21,9 @@ $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path (Split-Path -Parent $scriptDir) "lib\config_loader.ps1")
 
-# Create timestamped log file
+# Create timestamped log file in DataPath
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$logDir = (Load-Config).paths.temp_directory
-$logFile = Join-Path $logDir "exhaustive_run_$timestamp.log"
+$logFile = Join-Path $DataPath "exhaustive_run_$timestamp.log"
 
 function Write-Log {
     param([string]$Message)
@@ -161,7 +160,7 @@ Write-Log ""
 # Display results table
 $results | Format-Table -AutoSize | Out-String | ForEach-Object { Write-Log $_ }
 
-# Save results to JSON
-$resultsFile = Join-Path $logDir "exhaustive_results_$timestamp.json"
+# Save results to JSON in DataPath
+$resultsFile = Join-Path $DataPath "exhaustive_results_$timestamp.json"
 $results | ConvertTo-Json | Out-File -FilePath $resultsFile -Encoding UTF8
 Write-Log "Results saved to: $resultsFile"
