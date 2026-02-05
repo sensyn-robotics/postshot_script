@@ -59,41 +59,88 @@ When calling from bash, use:
 powershell -NoProfile -Command "& 'C:\path\to\script.ps1' -Param value"
 ```
 
-## Project Structure
+## Project Structure (Modular Architecture)
 
 ```
 postshot_script/
-├── config/                    # Configuration files
-│   ├── default_config.json    # Default settings (0.5fps)
-│   ├── config_0.2fps.json     # Low FPS for testing
-│   └── config_2fps.json       # High FPS for keyframe extraction
-├── lib/                       # PowerShell modules
-│   └── config_loader.ps1      # Config loading utilities
-├── scripts/                   # Main scripts
-│   ├── run_pipeline_exhaustive.ps1   # Main pipeline
-│   ├── run_scene1_02fps.ps1          # 0.2fps test runner
-│   ├── run_all_scenes_optimal.ps1    # All scenes runner
-│   ├── blur_detector.py              # Blur detection
-│   ├── optical_flow_analyzer.py      # Optical flow analysis
-│   └── frame_selector.py             # Combined frame selection
-└── requirements.txt           # Python dependencies
+├── config/
+│   ├── pipeline.json              # Unified config (primary)
+│   └── default_config.json        # Legacy config
+├── lib/
+│   └── config_loader.ps1          # Config loading utilities
+├── scripts/
+│   ├── stages/                    # Modular stage scripts
+│   │   ├── 01_extract_frames.ps1
+│   │   ├── 02_filter_frames.ps1
+│   │   ├── 03_colmap_features.ps1
+│   │   ├── 04_colmap_matching.ps1
+│   │   ├── 05_colmap_mapper.ps1
+│   │   ├── 06_postshot_train.ps1
+│   │   └── 07_postshot_export.ps1
+│   ├── run_pipeline_allscene.ps1  # Main pipeline runner (single or all scenes)
+│   ├── create_test_dataset.ps1    # Create small test dataset
+│   ├── debug/                     # Debug/diagnostic scripts
+│   ├── _archive/                  # Old scripts (for reference)
+│   ├── blur_detector.py           # Python: Blur detection
+│   ├── optical_flow_analyzer.py   # Python: Optical flow analysis
+│   ├── render_pointcloud.py       # Python: Point cloud visualization
+│   └── render_checkpoint.py       # Python: Checkpoint PLY visualization
+└── requirements.txt               # Python dependencies
 ```
 
 ## Key Scripts
 
-### run_pipeline_exhaustive.ps1
-Main pipeline with parameters:
-- `-InputPath`: Scene directory (required)
-- `-ConfigPath`: Custom config JSON (optional)
-- `-OutputDir`: Output directory name (default: "output")
-- `-VisualizationIntervalMinutes`: Visualization interval (default: 10)
+### run_pipeline_allscene.ps1 (Main Entry Point)
+Orchestrates all 7 stages with parameters:
+- `-ConfigPath`: Path to config JSON (required)
+- `-ScenePath`: Scene directory (optional - if not provided, processes ALL scenes in test_data_path)
+- `-StartStage`: Start from stage N (default: 1)
+- `-EndStage`: End at stage N (default: 7)
 
-### Frame Selection Pipeline
-The frame selection workflow:
-1. Extract frames at higher FPS (2fps) for more candidates
-2. `blur_detector.py` - Remove blurred frames (Laplacian Variance)
-3. `optical_flow_analyzer.py` - Select keyframes with target overlap (default: 80%)
-4. Limit to 400 frames maximum
+```powershell
+# Run full pipeline on ALL scenes (uses test_data_path from config)
+.\scripts\run_pipeline_allscene.ps1 -ConfigPath config\pipeline.json
+
+# Run full pipeline on a single scene
+.\scripts\run_pipeline_allscene.ps1 -ConfigPath config\pipeline.json -ScenePath "C:\path\to\scene"
+
+# Run only COLMAP stages (3-5)
+.\scripts\run_pipeline_allscene.ps1 -ConfigPath config\pipeline.json -ScenePath "C:\path\to\scene" -StartStage 3 -EndStage 5
+```
+
+### Pipeline Stages
+| Stage | Script | Description |
+|-------|--------|-------------|
+| 1 | `01_extract_frames.ps1` | Extract frames from videos (FFmpeg) |
+| 2 | `02_filter_frames.ps1` | Blur detection + keyframe selection |
+| 3 | `03_colmap_features.ps1` | COLMAP feature extraction |
+| 4 | `04_colmap_matching.ps1` | COLMAP feature matching |
+| 5 | `05_colmap_mapper.ps1` | COLMAP sparse reconstruction |
+| 6 | `06_postshot_train.ps1` | Postshot 3DGS training |
+| 7 | `07_postshot_export.ps1` | Export to PLY |
+
+Each stage:
+- Can be run independently
+- Skips if outputs already exist
+- Uses unified `config/pipeline.json`
+
+### Unified Config (config/pipeline.json)
+Single config file controls all stages:
+- `pipeline.overwrite_result` - If true, re-run even if outputs exist (default: false)
+- `pipeline.test_data_path` - Path to test data directory for all-scene mode
+- `stage_01_extract.fps` - Frame extraction rate
+- `stage_02_filter.enabled` - Enable/disable filtering
+- `stage_02_filter.target_overlap` - Keyframe overlap (0.8 = 80%)
+- `stage_03_features.camera_model` - COLMAP camera model
+- `stage_04_matching.type` - Matcher type (exhaustive/sequential)
+- `stage_06_train.checkpoints` - Training checkpoints
+- `stage_06_train.save_visualization` - Generate PLY visualization images
+
+### Frame Selection Pipeline (Stage 2)
+When `stage_02_filter.enabled = true`:
+1. `blur_detector.py` - Remove blurred frames (Laplacian variance)
+2. `optical_flow_analyzer.py` - Select keyframes with target overlap
+3. Limit to `max_frames` (default: 400)
 
 ### Overlap Calculation
 Overlap is estimated from optical flow using:
@@ -183,8 +230,41 @@ Scene1 also has `output_0.2fps/` with 102 frames (0.2fps test - worse quality th
 - This high overlap produces good COLMAP/Postshot results
 - Default target overlap updated to 99% in all scripts
 
-### Useful Scripts
-- `run_overlap_analysis_safe.ps1` - Analyze optical flow overlap
-- `check_all_scenes.ps1` - Check status of all scenes
-- `scripts/run_all_scenes.ps1` - Run pipeline on all scenes
-- `scripts/run_pipeline_exhaustive.ps1` - Main pipeline script
+### Key Commands
+
+**Run full pipeline on ALL scenes:**
+```powershell
+.\scripts\run_pipeline_allscene.ps1 -ConfigPath config\pipeline.json
+```
+
+**Run full pipeline on a single scene:**
+```powershell
+.\scripts\run_pipeline_allscene.ps1 -ConfigPath config\pipeline.json -ScenePath "C:\postshot_test_data\scene1"
+```
+
+**Create small test dataset:**
+```powershell
+.\scripts\create_test_dataset.ps1 -SourceScene "C:\postshot_test_data\scene1" -OutputPath "C:\test_small"
+```
+
+**Run single stage:**
+```powershell
+.\scripts\stages\03_colmap_features.ps1 -ConfigPath config\pipeline.json -ScenePath "C:\path\to\scene"
+```
+
+**Skip to specific stages:**
+```powershell
+# Resume from stage 5 (mapper)
+.\scripts\run_pipeline_allscene.ps1 -ConfigPath config\pipeline.json -ScenePath "C:\path" -StartStage 5
+```
+
+**Check status of all scenes:**
+```powershell
+.\scripts\debug\check_all_scenes_status.ps1
+```
+
+### Archived Scripts
+Old scripts are preserved in `scripts/_archive/` for reference. The modular architecture replaces:
+- `run_pipeline_exhaustive.ps1` → `run_pipeline_allscene.ps1` + stages
+- `run_scene*.ps1` → Use `run_pipeline_allscene.ps1 -ScenePath`
+- `run_all_scenes*.ps1` → Use `run_pipeline_allscene.ps1` (no -ScenePath)

@@ -22,12 +22,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Save parameters before dot-sourcing (dot-sourcing scripts with param blocks can interfere)
+$_savedInputPath = $InputPath
+$_savedConfigPath = $ConfigPath
+$_savedVisualizationIntervalMinutes = $VisualizationIntervalMinutes
+$_savedOutputDir = $OutputDir
+
 # Import dependencies
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path (Split-Path -Parent $scriptDir) "lib\config_loader.ps1")
 . (Join-Path $scriptDir "colmap_processor.ps1")
 . (Join-Path $scriptDir "video_extractor.ps1")
 . (Join-Path $scriptDir "postshot_runner.ps1")
+
+# Restore parameters after dot-sourcing
+$InputPath = $_savedInputPath
+$ConfigPath = $_savedConfigPath
+$VisualizationIntervalMinutes = $_savedVisualizationIntervalMinutes
+$OutputDir = $_savedOutputDir
 
 # === HELPER FUNCTIONS ===
 
@@ -264,64 +276,93 @@ function Run-ExhaustivePipeline {
     $databasePath = Join-Path $paths.ColmapOutput "database.db"
     $sparsePath = $paths.Sparse
 
-    # Create output directories
-    foreach ($dir in @($paths.ColmapOutput, $sparsePath)) {
-        if (-not (Test-Path $dir)) {
-            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    # Check for existing sparse model (also check direct sparse/ path for compatibility)
+    $existingSparseModel = $null
+    $altSparsePath = Join-Path $paths.Output "sparse"
+
+    # Check standard path first
+    if (Test-Path -LiteralPath $sparsePath) {
+        $existingModels = Get-ChildItem -LiteralPath $sparsePath -Directory -ErrorAction SilentlyContinue
+        if ($existingModels.Count -gt 0) {
+            $existingSparseModel = $existingModels[0].FullName
+        }
+    }
+    # Check alternate path (output/sparse instead of output/colmap_output/sparse)
+    if (-not $existingSparseModel -and (Test-Path -LiteralPath $altSparsePath)) {
+        $existingModels = Get-ChildItem -LiteralPath $altSparsePath -Directory -ErrorAction SilentlyContinue
+        if ($existingModels.Count -gt 0) {
+            $existingSparseModel = $existingModels[0].FullName
+            $sparsePath = $altSparsePath
         }
     }
 
-    # Step 2a: Feature Extraction
-    Write-Host "  Running feature extraction..." -ForegroundColor Cyan
-    $featureResult = Run-ColmapFeatureExtraction -ColmapExe $colmapExe -DatabasePath $databasePath -ImagePath $paths.Images -Config $Config
-    if (-not $featureResult) {
-        $result.Errors += "Feature extraction failed"
-        return $result
-    }
-
-    # Step 2b: Exhaustive Matching
-    Write-Host "  Running exhaustive matching..." -ForegroundColor Cyan
-    $matchResult = Run-ColmapMatching -ColmapExe $colmapExe -DatabasePath $databasePath -MatcherType "exhaustive" -Config $Config
-    if (-not $matchResult) {
-        $result.Errors += "Exhaustive matching failed"
-        return $result
-    }
-
-    # Step 2c: Mapper (with periodic visualization monitoring)
-    Write-Host "  Running mapper..." -ForegroundColor Cyan
-
-    # Start visualization monitor before long-running mapper
-    $vizLogPath = Join-Path $paths.Visualizations "viz_monitor.log"
-    Add-Content -Path $vizLogPath -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Starting visualization monitor"
-    $vizMonitorJob = Start-VisualizationMonitor -Type "colmap" -WatchPath $sparsePath -OutputDir $paths.Visualizations -IntervalMinutes $VisualizationIntervalMinutes
-    Write-Host "  Visualization monitor started (interval: $VisualizationIntervalMinutes min)" -ForegroundColor Gray
-
-    $mapperResult = Run-ColmapMapper -ColmapExe $colmapExe -DatabasePath $databasePath -ImagePath $paths.Images -OutputPath $sparsePath -Config $Config
-
-    # Stop visualization monitor
-    if ($vizMonitorJob) {
-        Stop-Job -Job $vizMonitorJob -ErrorAction SilentlyContinue
-        Remove-Job -Job $vizMonitorJob -Force -ErrorAction SilentlyContinue
-        Add-Content -Path $vizLogPath -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Visualization monitor stopped"
-        Write-Host "  Visualization monitor stopped" -ForegroundColor Gray
-    }
-
-    if (-not $mapperResult) {
-        $result.Errors += "Mapper failed"
-        return $result
-    }
-
-    # Find and visualize the largest reconstruction
-    $largestRecon = Get-LargestReconstruction -SparsePath $sparsePath
-    if ($largestRecon) {
-        $result.ColmapPath = $largestRecon
-        Write-Host "  Best reconstruction: $largestRecon" -ForegroundColor Green
-
-        # Save COLMAP visualization
-        Save-Visualization -Type "colmap" -SourcePath $largestRecon -OutputDir $paths.Visualizations -StepNumber 1
+    if ($existingSparseModel) {
+        # Skip COLMAP processing - use existing model
+        Write-Host "  Found existing sparse model: $existingSparseModel" -ForegroundColor Green
+        Write-Host "  Skipping COLMAP processing (using existing model)" -ForegroundColor Yellow
+        $result.ColmapPath = $existingSparseModel
+        $largestRecon = $existingSparseModel
     } else {
-        $result.Errors += "No valid reconstruction found"
-        return $result
+        # Run full COLMAP pipeline
+        # Create output directories
+        foreach ($dir in @($paths.ColmapOutput, $sparsePath)) {
+            if (-not (Test-Path $dir)) {
+                New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            }
+        }
+
+        # Step 2a: Feature Extraction
+        Write-Host "  Running feature extraction..." -ForegroundColor Cyan
+        $featureResult = Run-ColmapFeatureExtraction -ColmapExe $colmapExe -DatabasePath $databasePath -ImagePath $paths.Images -Config $Config
+        if (-not $featureResult) {
+            $result.Errors += "Feature extraction failed"
+            return $result
+        }
+
+        # Step 2b: Exhaustive Matching
+        Write-Host "  Running exhaustive matching..." -ForegroundColor Cyan
+        $matchResult = Run-ColmapMatching -ColmapExe $colmapExe -DatabasePath $databasePath -MatcherType "exhaustive" -Config $Config
+        if (-not $matchResult) {
+            $result.Errors += "Exhaustive matching failed"
+            return $result
+        }
+
+        # Step 2c: Mapper (with periodic visualization monitoring)
+        Write-Host "  Running mapper..." -ForegroundColor Cyan
+
+        # Start visualization monitor before long-running mapper
+        $vizLogPath = Join-Path $paths.Visualizations "viz_monitor.log"
+        Add-Content -Path $vizLogPath -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Starting visualization monitor"
+        $vizMonitorJob = Start-VisualizationMonitor -Type "colmap" -WatchPath $sparsePath -OutputDir $paths.Visualizations -IntervalMinutes $VisualizationIntervalMinutes
+        Write-Host "  Visualization monitor started (interval: $VisualizationIntervalMinutes min)" -ForegroundColor Gray
+
+        $mapperResult = Run-ColmapMapper -ColmapExe $colmapExe -DatabasePath $databasePath -ImagePath $paths.Images -OutputPath $sparsePath -Config $Config
+
+        # Stop visualization monitor
+        if ($vizMonitorJob) {
+            Stop-Job -Job $vizMonitorJob -ErrorAction SilentlyContinue
+            Remove-Job -Job $vizMonitorJob -Force -ErrorAction SilentlyContinue
+            Add-Content -Path $vizLogPath -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Visualization monitor stopped"
+            Write-Host "  Visualization monitor stopped" -ForegroundColor Gray
+        }
+
+        if (-not $mapperResult) {
+            $result.Errors += "Mapper failed"
+            return $result
+        }
+
+        # Find and visualize the largest reconstruction
+        $largestRecon = Get-LargestReconstruction -SparsePath $sparsePath
+        if ($largestRecon) {
+            $result.ColmapPath = $largestRecon
+            Write-Host "  Best reconstruction: $largestRecon" -ForegroundColor Green
+
+            # Save COLMAP visualization
+            Save-Visualization -Type "colmap" -SourcePath $largestRecon -OutputDir $paths.Visualizations -StepNumber 1
+        } else {
+            $result.Errors += "No valid reconstruction found"
+            return $result
+        }
     }
 
     # === Stage 3: Postshot Training with Periodic Visualization ===
@@ -330,25 +371,35 @@ function Run-ExhaustivePipeline {
     Write-Host "  Images: $($paths.Images)" -ForegroundColor Cyan
     Write-Host "  COLMAP sparse: $largestRecon" -ForegroundColor Cyan
 
-    # Start Postshot training
-    $postshotResult = Run-PostshotPipeline `
-        -InputPath $paths.Images `
-        -OutputPath $paths.Psht `
-        -Config $Config `
-        -ExportPly $Config.postshot.export_ply `
-        -ColmapSparsePath $largestRecon
+    # Check for existing PSHT file
+    if (Test-Path -LiteralPath $paths.Psht) {
+        Write-Host "  Found existing PSHT: $($paths.Psht)" -ForegroundColor Green
+        Write-Host "  Skipping Postshot training (using existing model)" -ForegroundColor Yellow
+        $result.PshtPath = $paths.Psht
+        if (Test-Path -LiteralPath $paths.Ply) {
+            $result.PlyPath = $paths.Ply
+        }
+    } else {
+        # Start Postshot training
+        $postshotResult = Run-PostshotPipeline `
+            -InputPath $paths.Images `
+            -OutputPath $paths.Psht `
+            -Config $Config `
+            -ExportPly $Config.postshot.export_ply `
+            -ColmapSparsePath $largestRecon
 
-    if (-not $postshotResult.Success) {
-        $result.Errors += "Postshot training failed"
-        return $result
-    }
+        if (-not $postshotResult.Success) {
+            $result.Errors += "Postshot training failed"
+            return $result
+        }
 
-    $result.PshtPath = $postshotResult.PshtPath
-    $result.PlyPath = $postshotResult.PlyPath
+        $result.PshtPath = $postshotResult.PshtPath
+        $result.PlyPath = $postshotResult.PlyPath
 
-    # Save final Postshot visualization
-    if ($postshotResult.PshtPath -and (Test-Path $postshotResult.PshtPath)) {
-        Save-Visualization -Type "postshot" -SourcePath $postshotResult.PshtPath -OutputDir $paths.Visualizations -StepNumber 99
+        # Save final Postshot visualization
+        if ($postshotResult.PshtPath -and (Test-Path $postshotResult.PshtPath)) {
+            Save-Visualization -Type "postshot" -SourcePath $postshotResult.PshtPath -OutputDir $paths.Visualizations -StepNumber 99
+        }
     }
 
     $result.Success = $true
