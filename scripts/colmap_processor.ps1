@@ -381,8 +381,16 @@ function Run-ColmapMapper {
 
     $mapperConfig = $Config.colmap.mapper
 
+    # Check if hierarchical mapper should be used
+    $useHierarchical = $false
+    if ($mapperConfig.PSObject.Properties["use_hierarchical"]) {
+        $useHierarchical = $mapperConfig.use_hierarchical
+    }
+
+    $mapperCommand = if ($useHierarchical) { "hierarchical_mapper" } else { "mapper" }
+
     $colmapArgs = @(
-        "mapper",
+        $mapperCommand,
         "--database_path", $DatabasePath,
         "--image_path", $ImagePath,
         "--output_path", $OutputPath
@@ -390,6 +398,8 @@ function Run-ColmapMapper {
 
     # Add mapper options from config (use --Option=value format)
     foreach ($prop in $mapperConfig.PSObject.Properties) {
+        # Skip our custom properties
+        if ($prop.Name -eq "use_hierarchical") { continue }
         $colmapArgs += "--$($prop.Name)=$($prop.Value)"
     }
 
