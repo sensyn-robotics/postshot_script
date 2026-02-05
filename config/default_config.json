@@ -13,7 +13,7 @@
   "colmap": {
     "feature_extractor": {
       "ImageReader.single_camera_per_folder": 1,
-      "ImageReader.camera_model": "OPENCV",
+      "ImageReader.camera_model": "SIMPLE_RADIAL",
       "SiftExtraction.max_num_features": 8192
     },
     "matcher": {
