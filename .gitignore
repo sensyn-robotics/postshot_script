@@ -21,6 +21,7 @@ Desktop.ini
 # IDE
 .vscode/
 .idea/
+.claude/
 
 # Credentials (never commit)
 *credentials*
