@@ -65,24 +65,29 @@ if ($config.pipeline -and $config.pipeline.PSObject.Properties['overwrite_result
 }
 
 # Check for existing reconstruction
-if ((Test-Path -LiteralPath $sparseDir) -and -not $overwrite) {
-    $reconFolders = Get-ChildItem -LiteralPath $sparseDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d+$' }
-    if ($reconFolders.Count -gt 0) {
-        # Verify at least one has required files
-        $validRecon = $false
-        foreach ($recon in $reconFolders) {
-            $imagesFile = Join-Path $recon.FullName "images.bin"
-            if (Test-Path -LiteralPath $imagesFile) {
-                $validRecon = $true
-                Write-Host "  Found existing reconstruction: $($recon.Name)" -ForegroundColor Yellow
-                break
+if (Test-Path -LiteralPath $sparseDir) {
+    if ($overwrite) {
+        Write-Host "  Deleting existing sparse directory (overwrite_result=true)..." -ForegroundColor Yellow
+        Remove-Item -LiteralPath $sparseDir -Recurse -Force
+    } else {
+        $reconFolders = Get-ChildItem -LiteralPath $sparseDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d+$' }
+        if ($reconFolders.Count -gt 0) {
+            # Verify at least one has required files
+            $validRecon = $false
+            foreach ($recon in $reconFolders) {
+                $imagesFile = Join-Path $recon.FullName "images.bin"
+                if (Test-Path -LiteralPath $imagesFile) {
+                    $validRecon = $true
+                    Write-Host "  Found existing reconstruction: $($recon.Name)" -ForegroundColor Yellow
+                    break
+                }
             }
-        }
-        if ($validRecon) {
-            Write-Host "  Skipping mapper (overwrite_result=false)" -ForegroundColor Yellow
-            Write-Host ""
-            Write-Host "Stage 5 Complete (skipped - reconstruction exists)" -ForegroundColor Green
-            exit 0
+            if ($validRecon) {
+                Write-Host "  Skipping mapper (overwrite_result=false)" -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "Stage 5 Complete (skipped - reconstruction exists)" -ForegroundColor Green
+                exit 0
+            }
         }
     }
 }

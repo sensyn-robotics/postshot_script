@@ -62,13 +62,18 @@ if ($config.pipeline -and $config.pipeline.PSObject.Properties['overwrite_result
 }
 
 # Check for existing PLY
-if ((Test-Path -LiteralPath $plyPath) -and -not $overwrite) {
-    $fileSize = (Get-Item -LiteralPath $plyPath).Length / 1MB
-    Write-Host "  Found existing PLY: $plyPath ($('{0:N2}' -f $fileSize) MB)" -ForegroundColor Yellow
-    Write-Host "  Skipping export (overwrite_result=false)" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Stage 7 Complete (skipped - PLY exists)" -ForegroundColor Green
-    exit 0
+if (Test-Path -LiteralPath $plyPath) {
+    if ($overwrite) {
+        Write-Host "  Deleting existing PLY (overwrite_result=true)..." -ForegroundColor Yellow
+        Remove-Item -LiteralPath $plyPath -Force
+    } else {
+        $fileSize = (Get-Item -LiteralPath $plyPath).Length / 1MB
+        Write-Host "  Found existing PLY: $plyPath ($('{0:N2}' -f $fileSize) MB)" -ForegroundColor Yellow
+        Write-Host "  Skipping export (overwrite_result=false)" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Stage 7 Complete (skipped - PLY exists)" -ForegroundColor Green
+        exit 0
+    }
 }
 
 # Credential management

@@ -41,11 +41,50 @@ $pythonExe = $config.paths.python
 $tempDir = $config.paths.temp
 $scriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 
+# Determine train_camera setting (default: "all" for backward compat)
+$trainCamera = "all"
+if ($config.stage_06_train -and $config.stage_06_train.PSObject.Properties['train_camera']) {
+    $trainCamera = $config.stage_06_train.train_camera
+}
+
+# Set up training images directory (may be overridden by junction)
+$trainImagesDir = $imagesDir
+$junctionDir = $null  # Will be set if we create a junction
+
+if ($trainCamera -ne "all") {
+    $cameraFolder = "video_$trainCamera"
+    $cameraSourceDir = Join-Path $imagesDir $cameraFolder
+
+    if (-not (Test-Path -LiteralPath $cameraSourceDir)) {
+        Write-Host "ERROR: Camera folder not found: $cameraSourceDir" -ForegroundColor Red
+        exit 1
+    }
+
+    # Create temporary junction directory for Z-only training
+    $junctionDir = Join-Path $outputDir "images_${trainCamera}_train"
+
+    # Clean up any leftover junction from a previous run
+    if (Test-Path -LiteralPath $junctionDir) {
+        # Remove junction subdir first, then the parent
+        $existingJunction = Join-Path $junctionDir $cameraFolder
+        if (Test-Path -LiteralPath $existingJunction) {
+            [System.IO.Directory]::Delete($existingJunction)
+        }
+        Remove-Item -LiteralPath $junctionDir -Force -Recurse -ErrorAction SilentlyContinue
+    }
+
+    New-Item -ItemType Directory -Path $junctionDir -Force | Out-Null
+    New-Item -ItemType Junction -Path (Join-Path $junctionDir $cameraFolder) -Target $cameraSourceDir | Out-Null
+
+    $trainImagesDir = $junctionDir
+    Write-Host "  Train camera: $trainCamera only (junction created)" -ForegroundColor Yellow
+}
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Stage 6: Postshot Training" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Images: $imagesDir" -ForegroundColor White
+Write-Host "  Images: $trainImagesDir$(if ($trainCamera -ne 'all') { " ($trainCamera camera only)" })" -ForegroundColor White
 Write-Host "  COLMAP sparse: $sparseDir" -ForegroundColor White
 Write-Host "  Output: $pshtPath" -ForegroundColor White
 
@@ -70,13 +109,18 @@ if ($config.pipeline -and $config.pipeline.PSObject.Properties['overwrite_result
 }
 
 # Check for existing .psht file
-if ((Test-Path -LiteralPath $pshtPath) -and -not $overwrite) {
-    $fileSize = (Get-Item -LiteralPath $pshtPath).Length / 1MB
-    Write-Host "  Found existing PSHT: $pshtPath ($('{0:N2}' -f $fileSize) MB)" -ForegroundColor Yellow
-    Write-Host "  Skipping training (overwrite_result=false)" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Stage 6 Complete (skipped - model exists)" -ForegroundColor Green
-    exit 0
+if (Test-Path -LiteralPath $pshtPath) {
+    if ($overwrite) {
+        Write-Host "  Deleting existing PSHT (overwrite_result=true)..." -ForegroundColor Yellow
+        Remove-Item -LiteralPath $pshtPath -Force
+    } else {
+        $fileSize = (Get-Item -LiteralPath $pshtPath).Length / 1MB
+        Write-Host "  Found existing PSHT: $pshtPath ($('{0:N2}' -f $fileSize) MB)" -ForegroundColor Yellow
+        Write-Host "  Skipping training (overwrite_result=false)" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Stage 6 Complete (skipped - model exists)" -ForegroundColor Green
+        exit 0
+    }
 }
 
 # Find best sparse reconstruction
@@ -167,14 +211,14 @@ try {
         '--login', $Cred.UserName,
         '--password', $PlainTextPassword,
         'train',
-        '-i', "`"$imagesDir`"",
+        '-i', "`"$trainImagesDir`"",
         '-i', "`"$sparsePath`"",
         '-o', "`"$pshtPath`""
     )
 
     Write-Host ""
     Write-Host "  Starting Postshot training..." -ForegroundColor Cyan
-    Write-Host "  Command: postshot-cli --login [EMAIL] --password [REDACTED] train -i `"$imagesDir`" -i `"$sparsePath`" -o `"$pshtPath`"" -ForegroundColor DarkGray
+    Write-Host "  Command: postshot-cli --login [EMAIL] --password [REDACTED] train -i `"$trainImagesDir`" -i `"$sparsePath`" -o `"$pshtPath`"" -ForegroundColor DarkGray
 
     $startTime = Get-Date
 
@@ -264,7 +308,8 @@ try {
     $trainInfo = @"
 Postshot Training Summary
 =========================
-Images: $imagesDir
+Images: $trainImagesDir
+Train camera: $trainCamera
 Sparse model: $sparsePath
 Output: $pshtPath
 PSHT Size: $('{0:N2}' -f $fileSize) MB
@@ -287,6 +332,19 @@ Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 finally {
     if ($PlainTextPassword) {
         $MarshalType::ZeroFreeBSTR($BSTR)
+    }
+
+    # Clean up junction directory
+    if ($junctionDir -and (Test-Path -LiteralPath $junctionDir)) {
+        Write-Host "  Cleaning up junction directory..." -ForegroundColor DarkGray
+        $cameraFolder = "video_$trainCamera"
+        $junctionTarget = Join-Path $junctionDir $cameraFolder
+        if (Test-Path -LiteralPath $junctionTarget) {
+            # Delete junction only - does NOT follow/delete target contents
+            [System.IO.Directory]::Delete($junctionTarget)
+        }
+        Remove-Item -LiteralPath $junctionDir -Force -Recurse -ErrorAction SilentlyContinue
+        Write-Host "  Junction cleaned up." -ForegroundColor DarkGray
     }
 }
 

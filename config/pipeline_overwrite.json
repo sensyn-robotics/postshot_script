@@ -1,6 +1,6 @@
 {
   "pipeline": {
-    "overwrite_result": false,
+    "overwrite_result": true,
     "test_data_path": "C:\\postshot_test_data"
   },
   "input": {
@@ -54,8 +54,7 @@
   "stage_06_train": {
     "checkpoints": [5000, 10000, 30000],
     "profile": "Splat3",
-    "save_visualization": true,
-    "train_camera": "Z"
+    "save_visualization": true
   },
   "stage_07_export": {
     "format": "ply"

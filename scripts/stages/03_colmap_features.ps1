@@ -63,12 +63,17 @@ if ($config.pipeline -and $config.pipeline.PSObject.Properties['overwrite_result
 }
 
 # Check if database already exists with features
-if ((Test-Path -LiteralPath $databasePath) -and -not $overwrite) {
-    Write-Host "  Database already exists: $databasePath" -ForegroundColor Yellow
-    Write-Host "  Skipping feature extraction (overwrite_result=false)" -ForegroundColor Yellow
-    Write-Host ""
-    Write-Host "Stage 3 Complete (skipped - database exists)" -ForegroundColor Green
-    exit 0
+if (Test-Path -LiteralPath $databasePath) {
+    if ($overwrite) {
+        Write-Host "  Deleting existing database (overwrite_result=true)..." -ForegroundColor Yellow
+        Remove-Item -LiteralPath $databasePath -Force
+    } else {
+        Write-Host "  Database already exists: $databasePath" -ForegroundColor Yellow
+        Write-Host "  Skipping feature extraction (overwrite_result=false)" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Stage 3 Complete (skipped - database exists)" -ForegroundColor Green
+        exit 0
+    }
 }
 
 # Create COLMAP output directory
