@@ -18,10 +18,18 @@ images/
 Thumbs.db
 Desktop.ini
 
+# Python
+__pycache__/
+*.pyc
+
 # IDE
 .vscode/
 .idea/
 .claude/
+
+# Debug/temp artifacts
+mapper_output.txt
+nul
 
 # Credentials (never commit)
 *credentials*

@@ -55,7 +55,13 @@
     "checkpoints": [5000, 10000, 30000],
     "profile": "Splat3",
     "save_visualization": true,
-    "train_camera": "Z"
+    "train_camera": "Z",
+    "anti_aliasing": true,
+    "train_steps_limit": 50,
+    "max_num_features": 16,
+    "max_sh_degree": 3,
+    "max_image_size": 3840,
+    "show_train_error": true
   },
   "stage_07_export": {
     "format": "ply"

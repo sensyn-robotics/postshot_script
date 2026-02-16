@@ -206,31 +206,161 @@ $BSTR = $MarshalType::SecureStringToBSTR($Cred.Password)
 $PlainTextPassword = $MarshalType::PtrToStringAuto($BSTR)
 
 try {
-    # Build CLI arguments for training
-    $CliArgs = @(
-        '--login', $Cred.UserName,
-        '--password', $PlainTextPassword,
-        'train',
-        '-i', "`"$trainImagesDir`"",
-        '-i', "`"$sparsePath`"",
-        '-o', "`"$pshtPath`""
-    )
+    # Read quality parameters from config (with defaults)
+    $antiAliasing = $true
+    $trainStepsLimit = 50
+    $maxNumFeatures = 16
+    $maxShDegree = 3
+    $maxImageSize = 3840
+    $showTrainError = $true
+
+    if ($config.stage_06_train) {
+        $tc = $config.stage_06_train
+        if ($tc.PSObject.Properties['anti_aliasing']) { $antiAliasing = $tc.anti_aliasing }
+        if ($tc.PSObject.Properties['train_steps_limit']) { $trainStepsLimit = $tc.train_steps_limit }
+        if ($tc.PSObject.Properties['max_num_features']) { $maxNumFeatures = $tc.max_num_features }
+        if ($tc.PSObject.Properties['max_sh_degree']) { $maxShDegree = $tc.max_sh_degree }
+        if ($tc.PSObject.Properties['max_image_size']) { $maxImageSize = $tc.max_image_size }
+        if ($tc.PSObject.Properties['show_train_error']) { $showTrainError = $tc.show_train_error }
+    }
 
     Write-Host ""
-    Write-Host "  Starting Postshot training..." -ForegroundColor Cyan
-    Write-Host "  Command: postshot-cli --login [EMAIL] --password [REDACTED] train -i `"$trainImagesDir`" -i `"$sparsePath`" -o `"$pshtPath`"" -ForegroundColor DarkGray
+    Write-Host "  Quality settings:" -ForegroundColor Cyan
+    Write-Host "    anti-aliasing:     $antiAliasing" -ForegroundColor White
+    Write-Host "    train-steps-limit: ${trainStepsLimit}k steps" -ForegroundColor White
+    Write-Host "    max-num-features:  ${maxNumFeatures}k" -ForegroundColor White
+    Write-Host "    max-sh-degree:     $maxShDegree" -ForegroundColor White
+    Write-Host "    max-image-size:    $maxImageSize px" -ForegroundColor White
+    Write-Host "    show-train-error:  $showTrainError" -ForegroundColor White
 
+    # OOM fallback levels (progressively reduce memory usage)
+    $fallbackLevels = @(
+        @{ max_image_size = $maxImageSize; max_num_features = $maxNumFeatures; train_steps_limit = $trainStepsLimit },
+        @{ max_image_size = 2560; max_num_features = $maxNumFeatures; train_steps_limit = $trainStepsLimit },
+        @{ max_image_size = 2560; max_num_features = 8; train_steps_limit = $trainStepsLimit },
+        @{ max_image_size = 1920; max_num_features = 8; train_steps_limit = 40 }
+    )
+
+    $trainLogFile = Join-Path $postshotDir "train_output.log"
+    $trainSuccess = $false
+    $trainOutputText = ""
+    $usedSettings = $null
     $startTime = Get-Date
+    $duration = $null
 
-    $process = Start-Process -FilePath $postshotCli `
-        -ArgumentList $CliArgs `
-        -NoNewWindow -Wait -PassThru
+    for ($attempt = 0; $attempt -lt $fallbackLevels.Count; $attempt++) {
+        $settings = $fallbackLevels[$attempt]
 
-    $duration = (Get-Date) - $startTime
+        if ($attempt -gt 0) {
+            Write-Host ""
+            Write-Host "  OOM fallback attempt $($attempt + 1)/4: max_image_size=$($settings.max_image_size), max_num_features=$($settings.max_num_features)k, train_steps_limit=$($settings.train_steps_limit)k" -ForegroundColor Yellow
+            if (Test-Path -LiteralPath $pshtPath) {
+                Remove-Item -LiteralPath $pshtPath -Force -ErrorAction SilentlyContinue
+            }
+        }
 
-    if ($process.ExitCode -ne 0) {
-        Write-Host "ERROR: Postshot training failed with exit code $($process.ExitCode)" -ForegroundColor Red
+        # Build argument string with proper quoting
+        $argsString = "--login `"$($Cred.UserName)`" --password `"$PlainTextPassword`" train"
+        $argsString += " -i `"$trainImagesDir`" -i `"$sparsePath`" -o `"$pshtPath`""
+        $argsString += " --anti-aliasing $($antiAliasing.ToString().ToLower())"
+        $argsString += " --train-steps-limit $($settings.train_steps_limit)"
+        $argsString += " --max-num-features $($settings.max_num_features)"
+        $argsString += " --max-sh-degree $maxShDegree"
+        $argsString += " --max-image-size $($settings.max_image_size)"
+        if ($showTrainError) { $argsString += " --show-train-error" }
+
+        $displayCmd = "postshot-cli train --anti-aliasing $($antiAliasing.ToString().ToLower()) --train-steps-limit $($settings.train_steps_limit) --max-num-features $($settings.max_num_features) --max-sh-degree $maxShDegree --max-image-size $($settings.max_image_size)$(if ($showTrainError) { ' --show-train-error' })"
+
+        Write-Host ""
+        Write-Host "  Starting Postshot training..." -ForegroundColor Cyan
+        Write-Host "  Command: $displayCmd" -ForegroundColor DarkGray
+        Write-Host "  Log: $trainLogFile" -ForegroundColor DarkGray
+
+        $startTime = Get-Date
+
+        # Use .NET Process for stdout capture with real-time display
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $postshotCli
+        $psi.Arguments = $argsString
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.CreateNoWindow = $true
+
+        $proc = New-Object System.Diagnostics.Process
+        $proc.StartInfo = $psi
+        $proc.Start() | Out-Null
+
+        # Read stderr asynchronously to prevent deadlock
+        $stderrTask = $proc.StandardError.ReadToEndAsync()
+
+        # Read stdout line-by-line with real-time display
+        $logContent = New-Object System.Text.StringBuilder
+        while (-not $proc.StandardOutput.EndOfStream) {
+            $line = $proc.StandardOutput.ReadLine()
+            if ($null -ne $line) {
+                Write-Host "    $line" -ForegroundColor DarkGray
+                [void]$logContent.AppendLine($line)
+            }
+        }
+        $proc.WaitForExit()
+
+        $stderrContent = $stderrTask.Result
+        if ($stderrContent) {
+            [void]$logContent.AppendLine($stderrContent)
+        }
+
+        $duration = (Get-Date) - $startTime
+        $exitCode = $proc.ExitCode
+        $trainOutputText = $logContent.ToString()
+
+        # Save log to file
+        Set-Content -Path $trainLogFile -Value $trainOutputText -ErrorAction SilentlyContinue
+
+        if ($exitCode -eq 0) {
+            $trainSuccess = $true
+            $usedSettings = $settings
+            if ($attempt -gt 0) {
+                Write-Host "  Training succeeded on fallback level $($attempt + 1)" -ForegroundColor Green
+            }
+            break
+        }
+
+        # Check if failure is OOM-related
+        $isOom = $trainOutputText -match '(?i)(out of memory|CUDA|OOM|allocation.?failed|insufficient.?memory)'
+
+        if (-not $isOom -or $attempt -eq ($fallbackLevels.Count - 1)) {
+            Write-Host "ERROR: Postshot training failed with exit code $exitCode" -ForegroundColor Red
+            if ($trainOutputText) {
+                Write-Host "  See log: $trainLogFile" -ForegroundColor DarkGray
+            }
+            exit 1
+        }
+
+        Write-Host "  Training failed (possible OOM, exit code $exitCode). Retrying with reduced settings..." -ForegroundColor Yellow
+    }
+
+    if (-not $trainSuccess) {
+        Write-Host "ERROR: All training attempts failed" -ForegroundColor Red
         exit 1
+    }
+
+    # Parse quality metrics from training output (SSIM or PSNR)
+    $qualityMetric = "N/A"
+    $qualityMetricName = "N/A"
+
+    # Extract the last SSIM value from training output (format: "SSIM 0.xxx")
+    $ssimMatches = [regex]::Matches($trainOutputText, 'SSIM\s+(\d+\.?\d*)')
+    if ($ssimMatches.Count -gt 0) {
+        $qualityMetric = $ssimMatches[$ssimMatches.Count - 1].Groups[1].Value
+        $qualityMetricName = "SSIM"
+        Write-Host "  Final training SSIM: $qualityMetric" -ForegroundColor Green
+    } elseif ($trainOutputText -match '(?i)PSNR[:\s=]+(\d+\.?\d*)') {
+        $qualityMetric = $Matches[1]
+        $qualityMetricName = "PSNR"
+        Write-Host "  Training PSNR: $qualityMetric dB" -ForegroundColor Green
+    } else {
+        Write-Host "  Quality metric not found in training output (check log: $trainLogFile)" -ForegroundColor Yellow
     }
 
     # Verify output
@@ -304,7 +434,8 @@ try {
         }
     }
 
-    # Save training info
+    # Save training info with quality settings and PSNR
+    $settingsUsed = if ($usedSettings) { "max_image_size=$($usedSettings.max_image_size), max_num_features=$($usedSettings.max_num_features)k, train_steps_limit=$($usedSettings.train_steps_limit)k" } else { "defaults" }
     $trainInfo = @"
 Postshot Training Summary
 =========================
@@ -312,9 +443,23 @@ Images: $trainImagesDir
 Train camera: $trainCamera
 Sparse model: $sparsePath
 Output: $pshtPath
+
+Quality Settings
+----------------
+anti-aliasing: $antiAliasing
+train-steps-limit: ${trainStepsLimit}k steps
+max-num-features: ${maxNumFeatures}k
+max-sh-degree: $maxShDegree
+max-image-size: $(if ($usedSettings) { $usedSettings.max_image_size } else { $maxImageSize }) px (configured: $maxImageSize)
+show-train-error: $showTrainError
+
+Results
+-------
+Quality metric: $qualityMetricName = $qualityMetric
 PSHT Size: $('{0:N2}' -f $fileSize) MB
 PLY Size: $(if (Test-Path -LiteralPath $plyPath) { '{0:N2}' -f ((Get-Item -LiteralPath $plyPath).Length / 1MB) } else { 'N/A' }) MB
 Duration: $($duration.ToString('hh\:mm\:ss'))
+Settings used: $settingsUsed
 Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 "@
 
