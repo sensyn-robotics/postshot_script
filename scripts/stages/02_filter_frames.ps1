@@ -51,10 +51,15 @@ Write-Host "  Target overlap: $($config.stage_02_filter.target_overlap * 100)%" 
 Write-Host "  Max frames: $($config.stage_02_filter.max_frames)" -ForegroundColor White
 Write-Host "========================================" -ForegroundColor Cyan
 
-# Validate Python
+# Validate Python (resolve bare command name from PATH if needed)
 if (-not (Test-Path -LiteralPath $pythonExe)) {
-    Write-Host "ERROR: Python not found at: $pythonExe" -ForegroundColor Red
-    exit 1
+    $resolved = (Get-Command $pythonExe -ErrorAction SilentlyContinue).Source
+    if ($resolved) {
+        $pythonExe = $resolved
+    } else {
+        Write-Host "ERROR: Python not found at: $pythonExe" -ForegroundColor Red
+        exit 1
+    }
 }
 
 # Validate images directory
@@ -66,8 +71,10 @@ if (-not (Test-Path -LiteralPath $imagesDir)) {
 # Count current frames
 $wImagesDir = Join-Path $imagesDir "video_W"
 $zImagesDir = Join-Path $imagesDir "video_Z"
+$singleImagesDir = Join-Path $imagesDir "video_single"
 $wCount = 0
 $zCount = 0
+$singleCount = 0
 if (Test-Path -LiteralPath $wImagesDir) {
     $wCount = (Get-ChildItem -LiteralPath $wImagesDir -File |
         Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
@@ -76,8 +83,19 @@ if (Test-Path -LiteralPath $zImagesDir) {
     $zCount = (Get-ChildItem -LiteralPath $zImagesDir -File |
         Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
 }
+if (Test-Path -LiteralPath $singleImagesDir) {
+    $singleCount = (Get-ChildItem -LiteralPath $singleImagesDir -File |
+        Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
+}
 
-Write-Host "  Current frame count: W=$wCount, Z=$zCount, Total=$($wCount + $zCount)" -ForegroundColor Cyan
+# Detect single video mode
+$singleVideoMode = ($wCount -eq 0 -and $zCount -eq 0 -and $singleCount -gt 0)
+
+if ($singleVideoMode) {
+    Write-Host "  Current frame count: Single=$singleCount" -ForegroundColor Cyan
+} else {
+    Write-Host "  Current frame count: W=$wCount, Z=$zCount, Total=$($wCount + $zCount)" -ForegroundColor Cyan
+}
 
 # Step 1: Blur Detection
 Write-Host ""
@@ -143,6 +161,7 @@ Write-Host "--- Step 2c: Frame Limit Check ---" -ForegroundColor Yellow
 # Recount frames after filtering
 $wCount = 0
 $zCount = 0
+$singleCount = 0
 if (Test-Path -LiteralPath $wImagesDir) {
     $wCount = (Get-ChildItem -LiteralPath $wImagesDir -File |
         Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
@@ -151,11 +170,19 @@ if (Test-Path -LiteralPath $zImagesDir) {
     $zCount = (Get-ChildItem -LiteralPath $zImagesDir -File |
         Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
 }
+if ($singleVideoMode -and (Test-Path -LiteralPath $singleImagesDir)) {
+    $singleCount = (Get-ChildItem -LiteralPath $singleImagesDir -File |
+        Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
+}
 
-$totalFrames = $wCount + $zCount
+$totalFrames = if ($singleVideoMode) { $singleCount } else { $wCount + $zCount }
 $maxFrames = $config.stage_02_filter.max_frames
 
-Write-Host "  Frames after filtering: W=$wCount, Z=$zCount, Total=$totalFrames" -ForegroundColor Cyan
+if ($singleVideoMode) {
+    Write-Host "  Frames after filtering: Single=$singleCount" -ForegroundColor Cyan
+} else {
+    Write-Host "  Frames after filtering: W=$wCount, Z=$zCount, Total=$totalFrames" -ForegroundColor Cyan
+}
 
 if ($totalFrames -gt $maxFrames) {
     Write-Host "  Frame count ($totalFrames) exceeds max ($maxFrames)" -ForegroundColor Yellow
@@ -182,6 +209,7 @@ if ($totalFrames -gt $maxFrames) {
 # Final count
 $wCount = 0
 $zCount = 0
+$singleCount = 0
 if (Test-Path -LiteralPath $wImagesDir) {
     $wCount = (Get-ChildItem -LiteralPath $wImagesDir -File |
         Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
@@ -190,12 +218,20 @@ if (Test-Path -LiteralPath $zImagesDir) {
     $zCount = (Get-ChildItem -LiteralPath $zImagesDir -File |
         Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
 }
+if ($singleVideoMode -and (Test-Path -LiteralPath $singleImagesDir)) {
+    $singleCount = (Get-ChildItem -LiteralPath $singleImagesDir -File |
+        Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "  Stage 2 Complete" -ForegroundColor Green
-Write-Host "  Final frame count: W=$wCount, Z=$zCount" -ForegroundColor White
-Write-Host "  Total: $($wCount + $zCount)" -ForegroundColor White
+if ($singleVideoMode) {
+    Write-Host "  Final frame count: Single=$singleCount" -ForegroundColor White
+} else {
+    Write-Host "  Final frame count: W=$wCount, Z=$zCount" -ForegroundColor White
+    Write-Host "  Total: $($wCount + $zCount)" -ForegroundColor White
+}
 Write-Host "========================================" -ForegroundColor Green
 
 exit 0

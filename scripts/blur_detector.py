@@ -27,6 +27,13 @@ import cv2
 import numpy as np
 
 
+def imread_unicode(image_path: str, flags=cv2.IMREAD_COLOR):
+    """Read an image supporting non-ASCII (e.g. Japanese) file paths on Windows."""
+    buf = np.fromfile(image_path, dtype=np.uint8)
+    img = cv2.imdecode(buf, flags)
+    return img
+
+
 def compute_laplacian_variance(image_path: str) -> float:
     """
     Compute Laplacian variance for blur detection.
@@ -38,7 +45,7 @@ def compute_laplacian_variance(image_path: str) -> float:
     Returns:
         Laplacian variance value (higher = sharper)
     """
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    img = imread_unicode(image_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise ValueError(f"Could not read image: {image_path}")
 

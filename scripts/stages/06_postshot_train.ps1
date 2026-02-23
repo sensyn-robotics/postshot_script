@@ -154,6 +154,21 @@ if (-not $sparsePath) {
 
 Write-Host "  Using sparse model: $sparsePath" -ForegroundColor Cyan
 
+# Clean non-image files from images directory (Postshot chokes on CSV/TXT files)
+# NOTE: Do NOT move blurred/skipped subdirectories - COLMAP indexed images in them
+$nonImageFiles = Get-ChildItem -LiteralPath $trainImagesDir -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -notin @('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG') }
+if ($nonImageFiles.Count -gt 0) {
+    $artifactsDir = Join-Path $outputDir "filter_artifacts"
+    if (-not (Test-Path -LiteralPath $artifactsDir)) {
+        New-Item -ItemType Directory -Path $artifactsDir -Force | Out-Null
+    }
+    foreach ($f in $nonImageFiles) {
+        Move-Item -LiteralPath $f.FullName -Destination (Join-Path $artifactsDir $f.Name) -Force
+        Write-Host "  Moved artifact: $($f.Name) -> filter_artifacts/" -ForegroundColor DarkGray
+    }
+}
+
 # Create output directories
 if (-not (Test-Path -LiteralPath $postshotDir)) {
     New-Item -ItemType Directory -Path $postshotDir -Force | Out-Null
@@ -308,11 +323,13 @@ try {
         $stderrContent = $stderrTask.Result
         if ($stderrContent) {
             [void]$logContent.AppendLine($stderrContent)
+            Write-Host "  [stderr]: $stderrContent" -ForegroundColor DarkYellow
         }
 
         $duration = (Get-Date) - $startTime
         $exitCode = $proc.ExitCode
         $trainOutputText = $logContent.ToString()
+        Write-Host "  Exit code: $exitCode" -ForegroundColor $(if ($exitCode -eq 0) { "Green" } else { "Red" })
 
         # Save log to file
         Set-Content -Path $trainLogFile -Value $trainOutputText -ErrorAction SilentlyContinue
@@ -433,6 +450,20 @@ try {
             }
         }
     }
+
+    # Write machine-readable quality.json for runner scripts
+    $qualityJsonPath = Join-Path $postshotDir "quality.json"
+    $qualityData = @{
+        metric_name = $qualityMetricName
+        steps = if ($usedSettings) { $usedSettings.train_steps_limit * 1000 } else { $trainStepsLimit * 1000 }
+    }
+    if ($qualityMetricName -eq "SSIM") {
+        $qualityData.ssim = [double]$qualityMetric
+    } elseif ($qualityMetricName -eq "PSNR") {
+        $qualityData.psnr = [double]$qualityMetric
+    }
+    $qualityData | ConvertTo-Json | Set-Content -Path $qualityJsonPath -Encoding UTF8
+    Write-Host "  Quality data saved to: $qualityJsonPath" -ForegroundColor Green
 
     # Save training info with quality settings and PSNR
     $settingsUsed = if ($usedSettings) { "max_image_size=$($usedSettings.max_image_size), max_num_features=$($usedSettings.max_num_features)k, train_steps_limit=$($usedSettings.train_steps_limit)k" } else { "defaults" }

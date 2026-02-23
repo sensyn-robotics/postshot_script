@@ -41,6 +41,7 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Images: $imagesDir" -ForegroundColor White
 Write-Host "  Database: $databasePath" -ForegroundColor White
 Write-Host "  Camera model: $($config.stage_03_features.camera_model)" -ForegroundColor White
+Write-Host "  Single camera: $(if ($config.stage_03_features.PSObject.Properties['single_camera'] -and $config.stage_03_features.single_camera) { 'Yes' } else { 'No' })" -ForegroundColor White
 Write-Host "  Max features: $($config.stage_03_features.max_features)" -ForegroundColor White
 Write-Host "========================================" -ForegroundColor Cyan
 
@@ -101,11 +102,16 @@ $env:QT_PLUGIN_PATH = Join-Path $colmapRootDir "plugins"
 
 # Build feature extraction arguments
 $singleCameraPerFolder = if ($config.stage_03_features.single_camera_per_folder) { 1 } else { 0 }
+$singleCamera = 0
+if ($config.stage_03_features.PSObject.Properties['single_camera'] -and $config.stage_03_features.single_camera) {
+    $singleCamera = 1
+}
 
 $colmapArgs = @(
     "feature_extractor",
     "--database_path", $databasePath,
     "--image_path", $imagesDir,
+    "--ImageReader.single_camera=$singleCamera",
     "--ImageReader.single_camera_per_folder=$singleCameraPerFolder",
     "--ImageReader.camera_model=$($config.stage_03_features.camera_model)",
     "--SiftExtraction.max_num_features=$($config.stage_03_features.max_features)"

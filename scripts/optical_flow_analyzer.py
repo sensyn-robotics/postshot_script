@@ -27,6 +27,13 @@ import cv2
 import numpy as np
 
 
+def imread_unicode(image_path: str, flags=cv2.IMREAD_COLOR):
+    """Read an image supporting non-ASCII (e.g. Japanese) file paths on Windows."""
+    buf = np.fromfile(image_path, dtype=np.uint8)
+    img = cv2.imdecode(buf, flags)
+    return img
+
+
 def compute_optical_flow(img1_path: str, img2_path: str) -> Dict:
     """
     Compute optical flow between two consecutive images.
@@ -44,8 +51,8 @@ def compute_optical_flow(img1_path: str, img2_path: str) -> Dict:
             - std_magnitude: Standard deviation of flow magnitude
             - coverage: Percentage of image with significant flow (> 1px)
     """
-    img1 = cv2.imread(img1_path, cv2.IMREAD_GRAYSCALE)
-    img2 = cv2.imread(img2_path, cv2.IMREAD_GRAYSCALE)
+    img1 = imread_unicode(img1_path, cv2.IMREAD_GRAYSCALE)
+    img2 = imread_unicode(img2_path, cv2.IMREAD_GRAYSCALE)
 
     if img1 is None:
         raise ValueError(f"Could not read image: {img1_path}")
@@ -178,7 +185,7 @@ def analyze_optical_flow(images_dir: str, output_csv: str = None, camera: str = 
         print(f"  Camera {cam}: Analyzing {len(images) - 1} frame pairs...")
 
         # Get image dimensions
-        sample_img = cv2.imread(str(images[0]))
+        sample_img = imread_unicode(str(images[0]))
         if sample_img is None:
             print(f"  WARNING: Could not read sample image")
             continue
@@ -271,7 +278,7 @@ def select_keyframes(images_dir: str, target_overlap: float = 99.0, camera: str 
         print(f"  Camera {cam}: Selecting keyframes from {len(images)} images...")
 
         # Get image dimensions
-        sample_img = cv2.imread(str(images[0]))
+        sample_img = imread_unicode(str(images[0]))
         if sample_img is None:
             continue
         img_height, img_width = sample_img.shape[:2]

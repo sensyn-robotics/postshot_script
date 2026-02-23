@@ -31,6 +31,9 @@ __pycache__/
 mapper_output.txt
 nul
 
+# Test data (large video files)
+data/
+
 # Credentials (never commit)
 *credentials*
 *secret*
