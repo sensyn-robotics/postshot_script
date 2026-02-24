@@ -60,6 +60,19 @@ if ($config.PSObject.Properties['quality_gate']) {
     }
 }
 
+# Detect 360 mode
+$is360Mode = $false
+if ($config.pipeline -and $config.pipeline.PSObject.Properties['mode'] -and $config.pipeline.mode -eq "360") {
+    $is360Mode = $true
+}
+if ($config.PSObject.Properties['stage_01b_cubemap'] -and $config.stage_01b_cubemap.PSObject.Properties['enabled'] -and $config.stage_01b_cubemap.enabled) {
+    $is360Mode = $true
+}
+
+if ($is360Mode) {
+    Write-Host "  Mode: 360 (cubemap decomposition enabled)" -ForegroundColor Yellow
+}
+
 # Stage definitions
 $stages = @(
     @{ Number = 1; Name = "01_extract_frames.ps1"; Description = "Frame Extraction" },
@@ -84,7 +97,8 @@ function Clean-OutputForRetry {
         (Join-Path $outputDir $Config.output.images_subdir),
         (Join-Path $outputDir $Config.output.colmap_subdir),
         (Join-Path $outputDir $Config.output.postshot_subdir),
-        (Join-Path $outputDir $Config.output.visualizations_subdir)
+        (Join-Path $outputDir $Config.output.visualizations_subdir),
+        (Join-Path $outputDir "equirect_originals")
     )
 
     foreach ($dir in $dirsToClean) {
@@ -146,6 +160,31 @@ function Run-StagesForScene {
         }
 
         Write-Host ">>> Stage $i completed in $($stageDuration.ToString('hh\:mm\:ss'))" -ForegroundColor Green
+
+        # Run cubemap decomposition after frame extraction in 360 mode
+        if ($is360Mode -and $i -eq 1) {
+            Write-Host ""
+            Write-Host ">>> Stage 1b: Cubemap Decomposition" -ForegroundColor Cyan
+
+            $cubemapScript = Join-Path $stagesDir "01b_cubemap_decompose.ps1"
+            if (-not (Test-Path -LiteralPath $cubemapScript)) {
+                Write-Host "ERROR: 01b_cubemap_decompose.ps1 not found: $cubemapScript" -ForegroundColor Red
+                return $false
+            }
+
+            $cubemapStartTime = Get-Date
+            & $cubemapScript -ConfigPath $ConfigPath -ScenePath $ScenePath
+
+            $cubemapExitCode = $LASTEXITCODE
+            $cubemapDuration = (Get-Date) - $cubemapStartTime
+
+            if ($cubemapExitCode -ne 0) {
+                Write-Host "!!! Stage 1b FAILED with exit code $cubemapExitCode" -ForegroundColor Red
+                return $false
+            }
+
+            Write-Host ">>> Stage 1b completed in $($cubemapDuration.ToString('hh\:mm\:ss'))" -ForegroundColor Green
+        }
     }
 
     return $true
