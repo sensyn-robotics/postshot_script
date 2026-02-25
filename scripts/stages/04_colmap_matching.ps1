@@ -100,6 +100,71 @@ $colmapArgs = @(
     "--database_path", $databasePath
 )
 
+# Sequential matcher advanced options
+if ($matcherType -eq "sequential") {
+    # Overlap (number of neighboring images to match)
+    if ($config.stage_04_matching.PSObject.Properties['overlap']) {
+        $overlap = $config.stage_04_matching.overlap
+        $colmapArgs += @("--SequentialMatching.overlap", $overlap)
+        Write-Host "  Overlap: $overlap" -ForegroundColor White
+    }
+
+    # Loop detection via vocab tree
+    if ($config.stage_04_matching.PSObject.Properties['loop_detection'] -and $config.stage_04_matching.loop_detection -eq $true) {
+        # Resolve vocab tree path
+        $vocabTreePath = $null
+        if ($config.stage_04_matching.PSObject.Properties['loop_detection_vocab_tree_path']) {
+            $vocabTreePath = $config.stage_04_matching.loop_detection_vocab_tree_path
+        } else {
+            # Default location next to COLMAP
+            $colmapRoot = Split-Path -Parent $colmapExe
+            $vocabTreePath = Join-Path $colmapRoot "vocab_tree_flickr100K_words32K.bin"
+        }
+
+        # Auto-download vocab tree if not found
+        if (-not (Test-Path -LiteralPath $vocabTreePath)) {
+            Write-Host "  Vocab tree not found at: $vocabTreePath" -ForegroundColor Yellow
+            Write-Host "  Downloading vocab tree (this only happens once)..." -ForegroundColor Yellow
+            $vocabTreeUrl = "https://demuc.de/colmap/vocab_tree_flickr100K_words32K.bin"
+            try {
+                $ProgressPreference = 'SilentlyContinue'
+                Invoke-WebRequest -Uri $vocabTreeUrl -OutFile $vocabTreePath -UseBasicParsing
+                Write-Host "  Downloaded vocab tree to: $vocabTreePath" -ForegroundColor Green
+            } catch {
+                Write-Host "ERROR: Failed to download vocab tree: $_" -ForegroundColor Red
+                Write-Host "  Download manually from: $vocabTreeUrl" -ForegroundColor Yellow
+                Write-Host "  Save to: $vocabTreePath" -ForegroundColor Yellow
+                exit 1
+            }
+        }
+
+        $colmapArgs += @("--SequentialMatching.loop_detection", "1")
+        $colmapArgs += @("--SequentialMatching.vocab_tree_path", $vocabTreePath)
+        Write-Host "  Loop detection: enabled" -ForegroundColor White
+        Write-Host "  Vocab tree: $vocabTreePath" -ForegroundColor White
+
+        # Loop detection period
+        if ($config.stage_04_matching.PSObject.Properties['loop_detection_period']) {
+            $period = $config.stage_04_matching.loop_detection_period
+            $colmapArgs += @("--SequentialMatching.loop_detection_period", $period)
+            Write-Host "  Loop detection period: $period" -ForegroundColor White
+        }
+
+        # Loop detection num images
+        if ($config.stage_04_matching.PSObject.Properties['loop_detection_num_images']) {
+            $numImages = $config.stage_04_matching.loop_detection_num_images
+            $colmapArgs += @("--SequentialMatching.loop_detection_num_images", $numImages)
+            Write-Host "  Loop detection candidates: $numImages" -ForegroundColor White
+        }
+    }
+}
+
+# Guided matching (works with any matcher type)
+if ($config.stage_04_matching.PSObject.Properties['guided_matching'] -and $config.stage_04_matching.guided_matching -eq $true) {
+    $colmapArgs += @("--SiftMatching.guided_matching", "1")
+    Write-Host "  Guided matching: enabled" -ForegroundColor White
+}
+
 Write-Host ""
 Write-Host "  Running $matcherType matching..." -ForegroundColor Cyan
 Write-Host "  Command: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
