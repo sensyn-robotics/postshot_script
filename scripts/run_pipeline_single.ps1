@@ -55,7 +55,23 @@ if ($config.PSObject.Properties['quality_gate']) {
     if ($config.quality_gate.PSObject.Properties['retry_strategy']) {
         $retryStrategy = @()
         foreach ($entry in $config.quality_gate.retry_strategy) {
-            $retryStrategy += @{ fps = $entry.fps; scale = $entry.scale }
+            # Support both old format ({fps, scale}) and new named format
+            $strat = @{
+                fps            = if ($entry.PSObject.Properties['fps']) { $entry.fps } else { 0 }
+                scale          = if ($entry.PSObject.Properties['scale']) { $entry.scale } else { 1.0 }
+                name           = if ($entry.PSObject.Properties['name']) { $entry.name } else { "" }
+                target_frames  = if ($entry.PSObject.Properties['target_frames']) { [int]$entry.target_frames } else { 0 }
+                max_features   = if ($entry.PSObject.Properties['max_features']) { [int]$entry.max_features } else { 0 }
+                matcher_type   = if ($entry.PSObject.Properties['matcher_type']) { $entry.matcher_type } else { "" }
+                sequential_overlap = if ($entry.PSObject.Properties['sequential_overlap']) { [int]$entry.sequential_overlap } else { 0 }
+                loop_detection = if ($entry.PSObject.Properties['loop_detection']) { $entry.loop_detection.ToString().ToLower() } else { "" }
+                guided_matching = if ($entry.PSObject.Properties['guided_matching']) { $entry.guided_matching.ToString().ToLower() } else { "" }
+                min_model_size = if ($entry.PSObject.Properties['min_model_size']) { [int]$entry.min_model_size } else { 0 }
+                init_min_num_inliers = if ($entry.PSObject.Properties['init_min_num_inliers']) { [int]$entry.init_min_num_inliers } else { 0 }
+                abs_pose_min_num_inliers = if ($entry.PSObject.Properties['abs_pose_min_num_inliers']) { [int]$entry.abs_pose_min_num_inliers } else { 0 }
+                abs_pose_min_inlier_ratio = if ($entry.PSObject.Properties['abs_pose_min_inlier_ratio']) { [double]$entry.abs_pose_min_inlier_ratio } else { 0 }
+            }
+            $retryStrategy += $strat
         }
     }
 }
@@ -104,7 +120,7 @@ function Clean-OutputForRetry {
     if (-not $PreserveImages) {
         $dirsToClean = @((Join-Path $outputDir $Config.output.images_subdir)) + $dirsToClean
     } else {
-        Write-Host "    Preserving images (StartStage > 1)" -ForegroundColor DarkGray
+        Write-Host "    Preserving images (same target_frames + scale)" -ForegroundColor DarkGray
     }
 
     foreach ($dir in $dirsToClean) {
@@ -115,6 +131,74 @@ function Clean-OutputForRetry {
     }
 }
 
+# Function to diagnose failure cause by inspecting output directory
+function Get-FailureDiagnosis {
+    param(
+        [string]$ScenePath,
+        [object]$Config
+    )
+
+    $outputDir = Join-Path $ScenePath $Config.output.dir_name
+    $imagesDir = Join-Path $outputDir $Config.output.images_subdir
+    $colmapDir = Join-Path $outputDir $Config.output.colmap_subdir
+    $databasePath = Join-Path $colmapDir "database.db"
+    $sparseDir = Join-Path $colmapDir "sparse"
+    $postshotDir = Join-Path $outputDir $Config.output.postshot_subdir
+
+    # Check images
+    $imageCount = 0
+    if (Test-Path -LiteralPath $imagesDir) {
+        $imageCount = (Get-ChildItem -LiteralPath $imagesDir -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in @(".png", ".jpg", ".jpeg", ".PNG", ".JPG", ".JPEG") }).Count
+    }
+
+    if ($imageCount -eq 0) {
+        return @{ stage = "extract"; message = "No images extracted (stage 1 failed)" }
+    }
+
+    # Check database
+    if (-not (Test-Path -LiteralPath $databasePath)) {
+        return @{ stage = "features"; message = "No database.db (stage 3 failed - feature extraction)" }
+    }
+
+    # Check sparse reconstruction
+    if (-not (Test-Path -LiteralPath $sparseDir)) {
+        return @{ stage = "matching"; message = "No sparse dir (stage 4/5 failed - matching or mapper)" }
+    }
+
+    $reconFolders = Get-ChildItem -LiteralPath $sparseDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d+$' }
+    if ($reconFolders.Count -eq 0) {
+        return @{ stage = "mapper"; message = "No reconstruction folders (stage 5 failed - mapper produced nothing)" }
+    }
+
+    # Check if any reconstruction has points
+    $hasPoints = $false
+    foreach ($recon in $reconFolders) {
+        $pointsBin = Join-Path $recon.FullName "points3D.bin"
+        if ((Test-Path -LiteralPath $pointsBin) -and (Get-Item -LiteralPath $pointsBin).Length -gt 0) {
+            $hasPoints = $true
+            break
+        }
+    }
+
+    if (-not $hasPoints) {
+        return @{ stage = "mapper"; message = "Reconstruction has 0 points (mapper failed to triangulate)" }
+    }
+
+    # Check Postshot output
+    $pshtFile = Join-Path $postshotDir "scene.psht"
+    if (-not (Test-Path -LiteralPath $pshtFile)) {
+        return @{ stage = "train"; message = "No scene.psht (stage 6 failed - Postshot training)" }
+    }
+
+    $plyFile = Join-Path $postshotDir "scene.ply"
+    if (-not (Test-Path -LiteralPath $plyFile)) {
+        return @{ stage = "export"; message = "No scene.ply (stage 7 failed - export)" }
+    }
+
+    return @{ stage = "quality"; message = "Pipeline completed but quality gate failed" }
+}
+
 # Function to run all stages for a scene with specific fps/scale
 function Run-StagesForScene {
     param(
@@ -123,7 +207,17 @@ function Run-StagesForScene {
         [int]$StartStage,
         [int]$EndStage,
         [double]$FpsOverride,
-        [double]$ScaleOverride
+        [double]$ScaleOverride,
+        [int]$TargetFramesOverride = 0,
+        [int]$MaxFeaturesOverride = 0,
+        [string]$MatcherTypeOverride = "",
+        [int]$SequentialOverlapOverride = 0,
+        [string]$LoopDetectionOverride = "",
+        [string]$GuidedMatchingOverride = "",
+        [int]$MinModelSizeOverride = 0,
+        [int]$InitMinNumInliersOverride = 0,
+        [int]$AbsPoseMinNumInliersOverride = 0,
+        [double]$AbsPoseMinInlierRatioOverride = 0
     )
 
     $stagesDir = Join-Path $PSScriptRoot "stages"
@@ -150,11 +244,34 @@ function Run-StagesForScene {
 
         $stageStartTime = Get-Date
 
-        # Stage 1 gets fps/scale overrides
-        if ($i -eq 1) {
-            & $stageScript -ConfigPath $ConfigPath -ScenePath $ScenePath -FpsOverride $FpsOverride -ScaleOverride $ScaleOverride
-        } else {
-            & $stageScript -ConfigPath $ConfigPath -ScenePath $ScenePath
+        # Pass stage-specific overrides
+        switch ($i) {
+            1 {
+                & $stageScript -ConfigPath $ConfigPath -ScenePath $ScenePath `
+                    -FpsOverride $FpsOverride -ScaleOverride $ScaleOverride `
+                    -TargetFramesOverride $TargetFramesOverride
+            }
+            3 {
+                & $stageScript -ConfigPath $ConfigPath -ScenePath $ScenePath `
+                    -MaxFeaturesOverride $MaxFeaturesOverride
+            }
+            4 {
+                & $stageScript -ConfigPath $ConfigPath -ScenePath $ScenePath `
+                    -MatcherTypeOverride $MatcherTypeOverride `
+                    -SequentialOverlapOverride $SequentialOverlapOverride `
+                    -LoopDetectionOverride $LoopDetectionOverride `
+                    -GuidedMatchingOverride $GuidedMatchingOverride
+            }
+            5 {
+                & $stageScript -ConfigPath $ConfigPath -ScenePath $ScenePath `
+                    -MinModelSizeOverride $MinModelSizeOverride `
+                    -InitMinNumInliersOverride $InitMinNumInliersOverride `
+                    -AbsPoseMinNumInliersOverride $AbsPoseMinNumInliersOverride `
+                    -AbsPoseMinInlierRatioOverride $AbsPoseMinInlierRatioOverride
+            }
+            default {
+                & $stageScript -ConfigPath $ConfigPath -ScenePath $ScenePath
+            }
         }
 
         $stageExitCode = $LASTEXITCODE
@@ -326,34 +443,102 @@ function Process-SceneWithRetry {
 
         $sceneStartTime = Get-Date
 
+        $prevTargetFrames = 0
+        $prevScale = 0
+
         for ($attempt = 0; $attempt -lt $RetryStrategy.Count; $attempt++) {
             $strategy = $RetryStrategy[$attempt]
-            $attemptFps = $strategy.fps
-            $attemptScale = $strategy.scale
+
+            # Extract strategy parameters
+            $attemptName = if ($strategy.name) { $strategy.name } else { "attempt_$($attempt + 1)" }
+            $attemptFps = [double]$strategy.fps
+            $attemptScale = [double]$strategy.scale
+            $attemptTargetFrames = [int]$strategy.target_frames
+            $attemptMaxFeatures = [int]$strategy.max_features
+            $attemptMatcherType = [string]$strategy.matcher_type
+            $attemptSeqOverlap = [int]$strategy.sequential_overlap
+            $attemptLoopDetection = [string]$strategy.loop_detection
+            $attemptGuidedMatching = [string]$strategy.guided_matching
+            $attemptMinModelSize = [int]$strategy.min_model_size
+            $attemptInitMinNumInliers = [int]$strategy.init_min_num_inliers
+            $attemptAbsPoseMinNumInliers = [int]$strategy.abs_pose_min_num_inliers
+            $attemptAbsPoseMinInlierRatio = [double]$strategy.abs_pose_min_inlier_ratio
 
             Write-Host ""
             Write-Host "========================================" -ForegroundColor Yellow
-            Write-Host "  Attempt $($attempt + 1)/$($RetryStrategy.Count): fps=$attemptFps, scale=${attemptScale}x" -ForegroundColor Yellow
+            Write-Host "  Attempt $($attempt + 1)/$($RetryStrategy.Count): $attemptName" -ForegroundColor Yellow
+            if ($attemptTargetFrames -gt 0) { Write-Host "    target_frames=$attemptTargetFrames" -ForegroundColor DarkGray }
+            if ($attemptFps -gt 0) { Write-Host "    fps=$attemptFps" -ForegroundColor DarkGray }
+            Write-Host "    scale=${attemptScale}x, matcher=$attemptMatcherType" -ForegroundColor DarkGray
+            if ($attemptMaxFeatures -gt 0) { Write-Host "    max_features=$attemptMaxFeatures" -ForegroundColor DarkGray }
+            if ($attemptMinModelSize -gt 0) { Write-Host "    min_model_size=$attemptMinModelSize, init_inliers=$attemptInitMinNumInliers" -ForegroundColor DarkGray }
             Write-Host "========================================" -ForegroundColor Yellow
 
             # Clean previous attempt output (except first attempt)
             if ($attempt -gt 0) {
                 Write-Host "  Cleaning previous attempt output..." -ForegroundColor Yellow
-                Clean-OutputForRetry -ScenePath $workingScenePath -Config $config -PreserveImages ($StartStage -gt 1)
+
+                # Smart clean: preserve images if target_frames + scale unchanged
+                $sameImages = ($attemptTargetFrames -eq $prevTargetFrames -and $attemptScale -eq $prevScale -and $attemptFps -eq [double]$RetryStrategy[$attempt - 1].fps)
+                $effectiveStartStage = $StartStage
+
+                if ($sameImages) {
+                    # Determine which stages actually need re-running based on diagnosis
+                    $diagnosis = Get-FailureDiagnosis -ScenePath $workingScenePath -Config $config
+                    Write-Host "  Diagnosis: $($diagnosis.message)" -ForegroundColor Yellow
+
+                    # Only clean COLMAP + later if images are the same
+                    Clean-OutputForRetry -ScenePath $workingScenePath -Config $config -PreserveImages $true
+
+                    # Start from the earliest failing stage
+                    switch ($diagnosis.stage) {
+                        "features" { $effectiveStartStage = [math]::Max($StartStage, 3) }
+                        "matching" { $effectiveStartStage = [math]::Max($StartStage, 3) }
+                        "mapper"   { $effectiveStartStage = [math]::Max($StartStage, 3) }
+                        "train"    { $effectiveStartStage = [math]::Max($StartStage, 6) }
+                        "export"   { $effectiveStartStage = [math]::Max($StartStage, 7) }
+                        default    { $effectiveStartStage = $StartStage }
+                    }
+                    Write-Host "  Resuming from stage $effectiveStartStage (images preserved)" -ForegroundColor Yellow
+                } else {
+                    Clean-OutputForRetry -ScenePath $workingScenePath -Config $config -PreserveImages ($StartStage -gt 1)
+                    $effectiveStartStage = $StartStage
+                }
+            } else {
+                $effectiveStartStage = $StartStage
             }
 
-            # Run all stages
+            $prevTargetFrames = $attemptTargetFrames
+            $prevScale = $attemptScale
+
+            # Run all stages with overrides
             $pipelineResult = Run-StagesForScene `
                 -ScenePath $workingScenePath `
                 -ConfigPath $ConfigPath `
-                -StartStage $StartStage `
+                -StartStage $effectiveStartStage `
                 -EndStage $EndStage `
                 -FpsOverride $attemptFps `
-                -ScaleOverride $attemptScale
+                -ScaleOverride $attemptScale `
+                -TargetFramesOverride $attemptTargetFrames `
+                -MaxFeaturesOverride $attemptMaxFeatures `
+                -MatcherTypeOverride $attemptMatcherType `
+                -SequentialOverlapOverride $attemptSeqOverlap `
+                -LoopDetectionOverride $attemptLoopDetection `
+                -GuidedMatchingOverride $attemptGuidedMatching `
+                -MinModelSizeOverride $attemptMinModelSize `
+                -InitMinNumInliersOverride $attemptInitMinNumInliers `
+                -AbsPoseMinNumInliersOverride $attemptAbsPoseMinNumInliers `
+                -AbsPoseMinInlierRatioOverride $attemptAbsPoseMinInlierRatio
 
             if (-not $pipelineResult) {
+                # Diagnose what went wrong
+                $diagnosis = Get-FailureDiagnosis -ScenePath $workingScenePath -Config $config
                 Write-Host ""
-                Write-Host "  Pipeline FAILED on attempt $($attempt + 1). Retrying..." -ForegroundColor Red
+                Write-Host "  Pipeline FAILED on attempt $($attempt + 1) ($attemptName)" -ForegroundColor Red
+                Write-Host "  Diagnosis: $($diagnosis.message)" -ForegroundColor Red
+                if ($attempt -lt $RetryStrategy.Count - 1) {
+                    Write-Host "  Retrying with next strategy..." -ForegroundColor Yellow
+                }
                 continue
             }
 
@@ -366,7 +551,7 @@ function Process-SceneWithRetry {
                 Write-Host "########################################################" -ForegroundColor Green
                 Write-Host "#  QUALITY GATE PASSED" -ForegroundColor Green
                 Write-Host "#  $($qualityResult.reason)" -ForegroundColor Green
-                Write-Host "#  Attempt: $($attempt + 1)/$($RetryStrategy.Count) (fps=$attemptFps, scale=${attemptScale}x)" -ForegroundColor Green
+                Write-Host "#  Attempt: $($attempt + 1)/$($RetryStrategy.Count) ($attemptName)" -ForegroundColor Green
                 Write-Host "#  Duration: $($sceneDuration.ToString('hh\:mm\:ss'))" -ForegroundColor Green
                 Write-Host "########################################################" -ForegroundColor Green
                 return $true
@@ -415,7 +600,8 @@ Write-Host "  Quality gate: SSIM >= $minSsim" -ForegroundColor White
 Write-Host "  Retry levels: $($retryStrategy.Count)" -ForegroundColor White
 for ($i = 0; $i -lt $retryStrategy.Count; $i++) {
     $s = $retryStrategy[$i]
-    Write-Host "    [$($i+1)] fps=$($s.fps), scale=$($s.scale)x" -ForegroundColor DarkGray
+    $label = if ($s.name) { $s.name } else { "fps=$($s.fps), scale=$($s.scale)x" }
+    Write-Host "    [$($i+1)] $label" -ForegroundColor DarkGray
 }
 Write-Host ""
 

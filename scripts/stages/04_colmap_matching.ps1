@@ -9,7 +9,19 @@ param(
     [string]$ConfigPath,
 
     [Parameter(Mandatory=$false)]
-    [string]$ScenePath
+    [string]$ScenePath,
+
+    [Parameter(Mandatory=$false)]
+    [string]$MatcherTypeOverride = "",
+
+    [Parameter(Mandatory=$false)]
+    [int]$SequentialOverlapOverride = 0,
+
+    [Parameter(Mandatory=$false)]
+    [string]$LoopDetectionOverride = "",
+
+    [Parameter(Mandatory=$false)]
+    [string]$GuidedMatchingOverride = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,7 +50,11 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Stage 4: COLMAP Feature Matching" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Database: $databasePath" -ForegroundColor White
-Write-Host "  Matcher type: $($config.stage_04_matching.type)" -ForegroundColor White
+$effectiveMatcherType = if (-not [string]::IsNullOrWhiteSpace($MatcherTypeOverride)) { $MatcherTypeOverride } else { $config.stage_04_matching.type }
+$effectiveLoopDetection = if (-not [string]::IsNullOrWhiteSpace($LoopDetectionOverride)) { $LoopDetectionOverride -eq "true" } else { $config.stage_04_matching.PSObject.Properties['loop_detection'] -and $config.stage_04_matching.loop_detection -eq $true }
+$effectiveGuidedMatching = if (-not [string]::IsNullOrWhiteSpace($GuidedMatchingOverride)) { $GuidedMatchingOverride -eq "true" } else { $config.stage_04_matching.PSObject.Properties['guided_matching'] -and $config.stage_04_matching.guided_matching -eq $true }
+
+Write-Host "  Matcher type: $effectiveMatcherType$(if (-not [string]::IsNullOrWhiteSpace($MatcherTypeOverride)) { ' (override)' })" -ForegroundColor White
 Write-Host "========================================" -ForegroundColor Cyan
 
 # Validate COLMAP
@@ -92,7 +108,7 @@ $env:PATH = "$(Join-Path $colmapRootDir 'bin');$env:PATH"
 $env:QT_PLUGIN_PATH = Join-Path $colmapRootDir "plugins"
 
 # Build matching arguments based on type
-$matcherType = $config.stage_04_matching.type
+$matcherType = $effectiveMatcherType
 $matcherCommand = "${matcherType}_matcher"
 
 $colmapArgs = @(
@@ -103,14 +119,14 @@ $colmapArgs = @(
 # Sequential matcher advanced options
 if ($matcherType -eq "sequential") {
     # Overlap (number of neighboring images to match)
-    if ($config.stage_04_matching.PSObject.Properties['overlap']) {
-        $overlap = $config.stage_04_matching.overlap
-        $colmapArgs += @("--SequentialMatching.overlap", $overlap)
-        Write-Host "  Overlap: $overlap" -ForegroundColor White
+    $effectiveOverlap = if ($SequentialOverlapOverride -gt 0) { $SequentialOverlapOverride } elseif ($config.stage_04_matching.PSObject.Properties['overlap']) { $config.stage_04_matching.overlap } else { 0 }
+    if ($effectiveOverlap -gt 0) {
+        $colmapArgs += @("--SequentialMatching.overlap", $effectiveOverlap)
+        Write-Host "  Overlap: $effectiveOverlap$(if ($SequentialOverlapOverride -gt 0) { ' (override)' })" -ForegroundColor White
     }
 
     # Loop detection via vocab tree
-    if ($config.stage_04_matching.PSObject.Properties['loop_detection'] -and $config.stage_04_matching.loop_detection -eq $true) {
+    if ($effectiveLoopDetection) {
         # Resolve vocab tree path
         $vocabTreePath = $null
         if ($config.stage_04_matching.PSObject.Properties['loop_detection_vocab_tree_path']) {
@@ -161,7 +177,7 @@ if ($matcherType -eq "sequential") {
 }
 
 # Guided matching (works with any matcher type)
-if ($config.stage_04_matching.PSObject.Properties['guided_matching'] -and $config.stage_04_matching.guided_matching -eq $true) {
+if ($effectiveGuidedMatching) {
     $colmapArgs += @("--FeatureMatching.guided_matching", "1")
     Write-Host "  Guided matching: enabled" -ForegroundColor White
 }

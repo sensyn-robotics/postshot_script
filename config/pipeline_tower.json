@@ -15,6 +15,7 @@
   },
   "paths": {
     "ffmpeg": "C:\\ffmpeg\\bin\\ffmpeg.exe",
+    "ffprobe": "C:\\ffmpeg\\bin\\ffprobe.exe",
     "colmap": "C:\\COLMAP\\COLMAP.bat",
     "postshot_cli": "C:\\Program Files\\Jawset Postshot\\bin\\postshot-cli.exe",
     "python": "python",
@@ -22,6 +23,7 @@
   },
   "stage_01_extract": {
     "fps": 2,
+    "target_frames": 400,
     "format": "png",
     "quality": 2
   },
@@ -73,11 +75,55 @@
   "quality_gate": {
     "min_ssim": 0.75,
     "retry_strategy": [
-      { "fps": 2, "scale": 1.0 },
-      { "fps": 1, "scale": 1.0 },
-      { "fps": 1, "scale": 0.8 },
-      { "fps": 1, "scale": 0.64 },
-      { "fps": 1, "scale": 0.512 }
+      {
+        "name": "exhaustive_full",
+        "description": "Exhaustive matcher, 400 frames, 16384 features, full res",
+        "target_frames": 400,
+        "scale": 1.0,
+        "max_features": 16384,
+        "matcher_type": "exhaustive",
+        "loop_detection": false,
+        "guided_matching": false
+      },
+      {
+        "name": "sequential_loop",
+        "description": "Sequential matcher + loop detection + guided matching",
+        "target_frames": 400,
+        "scale": 1.0,
+        "max_features": 16384,
+        "matcher_type": "sequential",
+        "sequential_overlap": 20,
+        "loop_detection": true,
+        "guided_matching": true
+      },
+      {
+        "name": "relaxed_mapper",
+        "description": "Exhaustive matcher, relaxed COLMAP thresholds",
+        "target_frames": 400,
+        "scale": 1.0,
+        "max_features": 16384,
+        "matcher_type": "exhaustive",
+        "loop_detection": false,
+        "guided_matching": false,
+        "min_model_size": 30,
+        "init_min_num_inliers": 30,
+        "abs_pose_min_num_inliers": 10,
+        "abs_pose_min_inlier_ratio": 0.1
+      },
+      {
+        "name": "reduced_frames",
+        "description": "Reduced frames + scale, lower features (last resort)",
+        "target_frames": 250,
+        "scale": 0.8,
+        "max_features": 8192,
+        "matcher_type": "exhaustive",
+        "loop_detection": false,
+        "guided_matching": false,
+        "min_model_size": 30,
+        "init_min_num_inliers": 30,
+        "abs_pose_min_num_inliers": 10,
+        "abs_pose_min_inlier_ratio": 0.1
+      }
     ]
   }
 }

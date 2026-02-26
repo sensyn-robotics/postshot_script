@@ -15,7 +15,10 @@ param(
     [double]$FpsOverride = 0,
 
     [Parameter(Mandatory=$false)]
-    [double]$ScaleOverride = 0
+    [double]$ScaleOverride = 0,
+
+    [Parameter(Mandatory=$false)]
+    [int]$TargetFramesOverride = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,9 +49,74 @@ $zImagesDir = Join-Path $imagesDir "video_Z"
 $singleImagesDir = Join-Path $imagesDir "video_single"
 $ffmpegExe = $config.paths.ffmpeg
 
+# Derive ffprobe path from config or from ffmpeg directory
+$ffprobeExe = $null
+if ($config.paths.PSObject.Properties['ffprobe']) {
+    $ffprobeExe = $config.paths.ffprobe
+} else {
+    $ffprobeExe = Join-Path (Split-Path -Parent $ffmpegExe) "ffprobe.exe"
+}
+
+# Helper: get video duration in seconds using ffprobe
+function Get-VideoDuration {
+    param([string]$VideoPath)
+
+    if (-not $ffprobeExe -or -not (Test-Path -LiteralPath $ffprobeExe)) {
+        Write-Host "  WARNING: ffprobe not found at '$ffprobeExe', cannot auto-compute FPS" -ForegroundColor Yellow
+        return 0
+    }
+
+    $tempFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $proc = Start-Process -FilePath $ffprobeExe `
+            -ArgumentList @("-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", $VideoPath) `
+            -NoNewWindow -Wait -PassThru -RedirectStandardOutput $tempFile
+        if ($proc.ExitCode -eq 0) {
+            $durationStr = (Get-Content $tempFile -Raw).Trim()
+            $duration = 0.0
+            if ([double]::TryParse($durationStr, [ref]$duration)) {
+                return $duration
+            }
+        }
+    } finally {
+        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+    }
+    return 0
+}
+
+# Determine target frames (override param > config)
+$targetFrames = 0
+if ($TargetFramesOverride -gt 0) {
+    $targetFrames = $TargetFramesOverride
+} elseif ($config.stage_01_extract.PSObject.Properties['target_frames'] -and $config.stage_01_extract.target_frames -gt 0) {
+    $targetFrames = $config.stage_01_extract.target_frames
+}
+
 # Determine effective fps and scale
 $fps = if ($FpsOverride -gt 0) { $FpsOverride } else { $config.stage_01_extract.fps }
 $scale = if ($ScaleOverride -gt 0) { $ScaleOverride } else { 1.0 }
+
+# Auto-compute FPS from target_frames if no explicit FPS override
+if ($targetFrames -gt 0 -and $FpsOverride -le 0) {
+    # Find all videos to compute total duration
+    $allVideos = Get-ChildItem -LiteralPath $ScenePath -File | Where-Object {
+        $_.Extension -in @(".mp4", ".MP4", ".mov", ".MOV", ".avi", ".AVI")
+    }
+    $totalDuration = 0.0
+    foreach ($v in $allVideos) {
+        $dur = Get-VideoDuration -VideoPath $v.FullName
+        if ($dur -gt 0) {
+            $totalDuration += $dur
+            Write-Host "  Video: $($v.Name) - duration: $([math]::Round($dur, 1))s" -ForegroundColor DarkGray
+        }
+    }
+    if ($totalDuration -gt 0) {
+        $fps = [math]::Round($targetFrames / $totalDuration, 3)
+        Write-Host "  Auto-FPS: target=$targetFrames frames / $([math]::Round($totalDuration, 1))s = ${fps} fps" -ForegroundColor Yellow
+    } else {
+        Write-Host "  WARNING: Could not determine video duration, using config fps=$fps" -ForegroundColor Yellow
+    }
+}
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -56,7 +124,13 @@ Write-Host "  Stage 1: Frame Extraction" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Scene: $ScenePath" -ForegroundColor White
 Write-Host "  Output: $imagesDir" -ForegroundColor White
-Write-Host "  FPS: $fps$(if ($FpsOverride -gt 0) { ' (override)' })" -ForegroundColor White
+$fpsLabel = "$fps"
+if ($FpsOverride -gt 0) { $fpsLabel += " (override)" }
+elseif ($targetFrames -gt 0) { $fpsLabel += " (auto from target=$targetFrames)" }
+Write-Host "  FPS: $fpsLabel" -ForegroundColor White
+if ($targetFrames -gt 0) {
+    Write-Host "  Target frames: $targetFrames" -ForegroundColor White
+}
 if ($scale -ne 1.0) {
     Write-Host "  Scale: ${scale}x (override)" -ForegroundColor White
 }

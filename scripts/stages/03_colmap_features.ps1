@@ -9,7 +9,10 @@ param(
     [string]$ConfigPath,
 
     [Parameter(Mandatory=$false)]
-    [string]$ScenePath
+    [string]$ScenePath,
+
+    [Parameter(Mandatory=$false)]
+    [int]$MaxFeaturesOverride = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,7 +45,8 @@ Write-Host "  Images: $imagesDir" -ForegroundColor White
 Write-Host "  Database: $databasePath" -ForegroundColor White
 Write-Host "  Camera model: $($config.stage_03_features.camera_model)" -ForegroundColor White
 Write-Host "  Single camera: $(if ($config.stage_03_features.PSObject.Properties['single_camera'] -and $config.stage_03_features.single_camera) { 'Yes' } else { 'No' })" -ForegroundColor White
-Write-Host "  Max features: $($config.stage_03_features.max_features)" -ForegroundColor White
+$effectiveMaxFeatures = if ($MaxFeaturesOverride -gt 0) { $MaxFeaturesOverride } else { $config.stage_03_features.max_features }
+Write-Host "  Max features: $effectiveMaxFeatures$(if ($MaxFeaturesOverride -gt 0) { ' (override)' })" -ForegroundColor White
 Write-Host "========================================" -ForegroundColor Cyan
 
 # Validate COLMAP
@@ -114,7 +118,7 @@ $colmapArgs = @(
     "--ImageReader.single_camera=$singleCamera",
     "--ImageReader.single_camera_per_folder=$singleCameraPerFolder",
     "--ImageReader.camera_model=$($config.stage_03_features.camera_model)",
-    "--SiftExtraction.max_num_features=$($config.stage_03_features.max_features)"
+    "--SiftExtraction.max_num_features=$effectiveMaxFeatures"
 )
 
 Write-Host ""

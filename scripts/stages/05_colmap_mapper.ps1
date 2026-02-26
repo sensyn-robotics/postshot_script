@@ -9,7 +9,19 @@ param(
     [string]$ConfigPath,
 
     [Parameter(Mandatory=$false)]
-    [string]$ScenePath
+    [string]$ScenePath,
+
+    [Parameter(Mandatory=$false)]
+    [int]$MinModelSizeOverride = 0,
+
+    [Parameter(Mandatory=$false)]
+    [int]$InitMinNumInliersOverride = 0,
+
+    [Parameter(Mandatory=$false)]
+    [int]$AbsPoseMinNumInliersOverride = 0,
+
+    [Parameter(Mandatory=$false)]
+    [double]$AbsPoseMinInlierRatioOverride = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -143,6 +155,18 @@ if (-not (Test-Path -LiteralPath $vizDir)) {
     New-Item -ItemType Directory -Path $vizDir -Force | Out-Null
 }
 
+# Resolve effective mapper parameters (override > config)
+$effectiveMinModelSize = if ($MinModelSizeOverride -gt 0) { $MinModelSizeOverride } else { $config.stage_05_mapper.min_model_size }
+$effectiveInitMinNumInliers = if ($InitMinNumInliersOverride -gt 0) { $InitMinNumInliersOverride } else { $config.stage_05_mapper.init_min_num_inliers }
+$effectiveAbsPoseMinNumInliers = if ($AbsPoseMinNumInliersOverride -gt 0) { $AbsPoseMinNumInliersOverride } else { $config.stage_05_mapper.abs_pose_min_num_inliers }
+$effectiveAbsPoseMinInlierRatio = if ($AbsPoseMinInlierRatioOverride -gt 0) { $AbsPoseMinInlierRatioOverride } else { $config.stage_05_mapper.abs_pose_min_inlier_ratio }
+
+# Log overrides
+if ($MinModelSizeOverride -gt 0) { Write-Host "  min_model_size: $effectiveMinModelSize (override)" -ForegroundColor Yellow }
+if ($InitMinNumInliersOverride -gt 0) { Write-Host "  init_min_num_inliers: $effectiveInitMinNumInliers (override)" -ForegroundColor Yellow }
+if ($AbsPoseMinNumInliersOverride -gt 0) { Write-Host "  abs_pose_min_num_inliers: $effectiveAbsPoseMinNumInliers (override)" -ForegroundColor Yellow }
+if ($AbsPoseMinInlierRatioOverride -gt 0) { Write-Host "  abs_pose_min_inlier_ratio: $effectiveAbsPoseMinInlierRatio (override)" -ForegroundColor Yellow }
+
 # Build mapper arguments
 $multipleModels = if ($config.stage_05_mapper.multiple_models) { 1 } else { 0 }
 
@@ -152,12 +176,12 @@ $colmapArgs = @(
     "--image_path", $imagesDir,
     "--output_path", $sparseDir,
     "--Mapper.multiple_models=$multipleModels",
-    "--Mapper.min_model_size=$($config.stage_05_mapper.min_model_size)",
+    "--Mapper.min_model_size=$effectiveMinModelSize",
     "--Mapper.ba_global_max_num_iterations=$($config.stage_05_mapper.ba_global_max_iterations)",
     "--Mapper.ba_local_max_num_iterations=$($config.stage_05_mapper.ba_local_max_iterations)",
-    "--Mapper.init_min_num_inliers=$($config.stage_05_mapper.init_min_num_inliers)",
-    "--Mapper.abs_pose_min_num_inliers=$($config.stage_05_mapper.abs_pose_min_num_inliers)",
-    "--Mapper.abs_pose_min_inlier_ratio=$($config.stage_05_mapper.abs_pose_min_inlier_ratio)"
+    "--Mapper.init_min_num_inliers=$effectiveInitMinNumInliers",
+    "--Mapper.abs_pose_min_num_inliers=$effectiveAbsPoseMinNumInliers",
+    "--Mapper.abs_pose_min_inlier_ratio=$effectiveAbsPoseMinInlierRatio"
 )
 
 Write-Host ""
