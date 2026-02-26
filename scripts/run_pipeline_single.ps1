@@ -88,18 +88,24 @@ $stages = @(
 function Clean-OutputForRetry {
     param(
         [string]$ScenePath,
-        [object]$Config
+        [object]$Config,
+        [bool]$PreserveImages = $false
     )
 
     $outputDir = Join-Path $ScenePath $Config.output.dir_name
 
     $dirsToClean = @(
-        (Join-Path $outputDir $Config.output.images_subdir),
         (Join-Path $outputDir $Config.output.colmap_subdir),
         (Join-Path $outputDir $Config.output.postshot_subdir),
         (Join-Path $outputDir $Config.output.visualizations_subdir),
         (Join-Path $outputDir "equirect_originals")
     )
+
+    if (-not $PreserveImages) {
+        $dirsToClean = @((Join-Path $outputDir $Config.output.images_subdir)) + $dirsToClean
+    } else {
+        Write-Host "    Preserving images (StartStage > 1)" -ForegroundColor DarkGray
+    }
 
     foreach ($dir in $dirsToClean) {
         if (Test-Path -LiteralPath $dir) {
@@ -333,7 +339,7 @@ function Process-SceneWithRetry {
             # Clean previous attempt output (except first attempt)
             if ($attempt -gt 0) {
                 Write-Host "  Cleaning previous attempt output..." -ForegroundColor Yellow
-                Clean-OutputForRetry -ScenePath $workingScenePath -Config $config
+                Clean-OutputForRetry -ScenePath $workingScenePath -Config $config -PreserveImages ($StartStage -gt 1)
             }
 
             # Run all stages

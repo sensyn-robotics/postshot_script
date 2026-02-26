@@ -2,7 +2,7 @@
 # Stage 5: COLMAP sparse reconstruction (mapper)
 #
 # Input: output/colmap/database.db + output/images/
-# Output: output/colmap/sparse/0/
+# Output: output/colmap/sparse/0/ (binary) + output/colmap/sparse/0/points3D.ply
 
 param(
     [Parameter(Mandatory=$true)]
@@ -58,6 +58,46 @@ if (-not (Test-Path -LiteralPath $databasePath)) {
     exit 1
 }
 
+# Resolve COLMAP binary path and set up environment
+$colmapBin = if ($colmapExe -like "*.bat") {
+    Join-Path (Split-Path -Parent $colmapExe) "bin\colmap.exe"
+} else {
+    $colmapExe
+}
+
+$colmapRootDir = if ($colmapExe -like "*.bat") {
+    Split-Path -Parent $colmapExe
+} else {
+    Split-Path -Parent (Split-Path -Parent $colmapExe)
+}
+
+$env:PATH = "$(Join-Path $colmapRootDir 'bin');$env:PATH"
+$env:QT_PLUGIN_PATH = Join-Path $colmapRootDir "plugins"
+
+# Export sparse model to PLY using colmap model_converter
+function Export-SparsePly {
+    param([string]$ReconPath)
+
+    $plyPath = Join-Path $ReconPath "points3D.ply"
+    if (Test-Path -LiteralPath $plyPath) {
+        $plySizeMB = [math]::Round((Get-Item -LiteralPath $plyPath).Length / 1MB, 2)
+        Write-Host "  PLY already exists: $plyPath ($plySizeMB MB)" -ForegroundColor Yellow
+        return
+    }
+
+    Write-Host "  Exporting sparse model to PLY..." -ForegroundColor Cyan
+    $convertProcess = Start-Process -FilePath $colmapBin `
+        -ArgumentList @("model_converter", "--input_path", $ReconPath, "--output_path", $plyPath, "--output_type", "PLY") `
+        -NoNewWindow -Wait -PassThru
+
+    if ($convertProcess.ExitCode -eq 0 -and (Test-Path -LiteralPath $plyPath)) {
+        $plySizeMB = [math]::Round((Get-Item -LiteralPath $plyPath).Length / 1MB, 2)
+        Write-Host "  PLY exported: $plyPath ($plySizeMB MB)" -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: PLY export failed (exit code $($convertProcess.ExitCode))" -ForegroundColor Yellow
+    }
+}
+
 # Check overwrite setting
 $overwrite = $false
 if ($config.pipeline -and $config.pipeline.PSObject.Properties['overwrite_result']) {
@@ -84,6 +124,7 @@ if (Test-Path -LiteralPath $sparseDir) {
             }
             if ($validRecon) {
                 Write-Host "  Skipping mapper (overwrite_result=false)" -ForegroundColor Yellow
+                Export-SparsePly -ReconPath $recon.FullName
                 Write-Host ""
                 Write-Host "Stage 5 Complete (skipped - reconstruction exists)" -ForegroundColor Green
                 exit 0
@@ -101,24 +142,6 @@ if (-not (Test-Path -LiteralPath $sparseDir)) {
 if (-not (Test-Path -LiteralPath $vizDir)) {
     New-Item -ItemType Directory -Path $vizDir -Force | Out-Null
 }
-
-# Get COLMAP binary path
-$colmapBin = if ($colmapExe -like "*.bat") {
-    $colmapBinDir = Split-Path -Parent $colmapExe
-    Join-Path $colmapBinDir "bin\colmap.exe"
-} else {
-    $colmapExe
-}
-
-# Set up COLMAP environment
-$colmapRootDir = if ($colmapExe -like "*.bat") {
-    Split-Path -Parent $colmapExe
-} else {
-    Split-Path -Parent (Split-Path -Parent $colmapExe)
-}
-
-$env:PATH = "$(Join-Path $colmapRootDir 'bin');$env:PATH"
-$env:QT_PLUGIN_PATH = Join-Path $colmapRootDir "plugins"
 
 # Build mapper arguments
 $multipleModels = if ($config.stage_05_mapper.multiple_models) { 1 } else { 0 }
@@ -192,6 +215,9 @@ if (-not $largestRecon) {
 }
 
 Write-Host "  Selected reconstruction: $($largestRecon.Name)" -ForegroundColor Green
+
+# Export PLY
+Export-SparsePly -ReconPath $largestRecon.FullName
 
 # Save visualization (simple point cloud stats for now)
 $vizInfoFile = Join-Path $vizDir "reconstruction_info.txt"

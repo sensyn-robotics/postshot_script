@@ -125,7 +125,8 @@ if ($matcherType -eq "sequential") {
         if (-not (Test-Path -LiteralPath $vocabTreePath)) {
             Write-Host "  Vocab tree not found at: $vocabTreePath" -ForegroundColor Yellow
             Write-Host "  Downloading vocab tree (this only happens once)..." -ForegroundColor Yellow
-            $vocabTreeUrl = "https://demuc.de/colmap/vocab_tree_flickr100K_words32K.bin"
+            # Use faiss-compatible vocab tree (COLMAP switched from flann to faiss in May 2025)
+            $vocabTreeUrl = "https://github.com/ZachMckennedyFWig/ColmapFaissVocabTrees/raw/main/vocab_tree_flickr100K_words32K.bin"
             try {
                 $ProgressPreference = 'SilentlyContinue'
                 Invoke-WebRequest -Uri $vocabTreeUrl -OutFile $vocabTreePath -UseBasicParsing
@@ -161,7 +162,7 @@ if ($matcherType -eq "sequential") {
 
 # Guided matching (works with any matcher type)
 if ($config.stage_04_matching.PSObject.Properties['guided_matching'] -and $config.stage_04_matching.guided_matching -eq $true) {
-    $colmapArgs += @("--SiftMatching.guided_matching", "1")
+    $colmapArgs += @("--FeatureMatching.guided_matching", "1")
     Write-Host "  Guided matching: enabled" -ForegroundColor White
 }
 
