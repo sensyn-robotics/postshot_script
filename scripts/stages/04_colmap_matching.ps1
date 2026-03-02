@@ -176,6 +176,13 @@ if ($matcherType -eq "sequential") {
     }
 }
 
+# SIFT matching max_ratio (Lowe's ratio test - lower = stricter)
+$siftMaxRatio = if ($config.stage_04_matching.PSObject.Properties['sift_max_ratio']) {
+    $config.stage_04_matching.sift_max_ratio
+} else { 0.7 }
+$colmapArgs += @("--SiftMatching.max_ratio", $siftMaxRatio)
+Write-Host "  SIFT max_ratio: $siftMaxRatio" -ForegroundColor White
+
 # Guided matching (works with any matcher type)
 if ($effectiveGuidedMatching) {
     $colmapArgs += @("--FeatureMatching.guided_matching", "1")

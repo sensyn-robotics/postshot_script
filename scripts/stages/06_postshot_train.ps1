@@ -451,6 +451,36 @@ try {
         }
     }
 
+    # Compute LPIPS if PLY exists and compute_lpips.py is available
+    $lpipsMean = $null
+    $lpipsScript = Join-Path $scriptDir "compute_lpips.py"
+    if ((Test-Path -LiteralPath $lpipsScript) -and (Test-Path -LiteralPath $plyPath)) {
+        Write-Host ""
+        Write-Host "  Computing LPIPS (perceptual quality)..." -ForegroundColor Cyan
+        $lpipsJson = Join-Path $postshotDir "lpips.json"
+
+        # Determine python command: prefer "uv run python" if uv is available
+        $uvExe = Get-Command "uv" -ErrorAction SilentlyContinue
+        if ($uvExe) {
+            $lpipsProcess = Start-Process -FilePath $uvExe.Source `
+                -ArgumentList @("run", "python", $lpipsScript, "--ply", $plyPath, "--sparse", $sparsePath, "--images", $trainImagesDir, "--output", $lpipsJson, "--max-images", "50") `
+                -NoNewWindow -Wait -PassThru `
+                -WorkingDirectory (Split-Path -Parent $scriptDir)
+        } else {
+            $lpipsProcess = Start-Process -FilePath $pythonExe `
+                -ArgumentList @($lpipsScript, "--ply", $plyPath, "--sparse", $sparsePath, "--images", $trainImagesDir, "--output", $lpipsJson, "--max-images", "50") `
+                -NoNewWindow -Wait -PassThru
+        }
+
+        if ($lpipsProcess.ExitCode -eq 0 -and (Test-Path -LiteralPath $lpipsJson)) {
+            $lpipsData = Get-Content $lpipsJson -Raw | ConvertFrom-Json
+            $lpipsMean = $lpipsData.lpips_mean
+            Write-Host "  LPIPS: $lpipsMean" -ForegroundColor Green
+        } else {
+            Write-Host "  WARNING: LPIPS computation failed (exit code: $($lpipsProcess.ExitCode))" -ForegroundColor Yellow
+        }
+    }
+
     # Write machine-readable quality.json for runner scripts
     $qualityJsonPath = Join-Path $postshotDir "quality.json"
     $qualityData = @{
@@ -461,6 +491,9 @@ try {
         $qualityData.ssim = [double]$qualityMetric
     } elseif ($qualityMetricName -eq "PSNR") {
         $qualityData.psnr = [double]$qualityMetric
+    }
+    if ($null -ne $lpipsMean) {
+        $qualityData.lpips = [double]$lpipsMean
     }
     $qualityData | ConvertTo-Json | Set-Content -Path $qualityJsonPath -Encoding UTF8
     Write-Host "  Quality data saved to: $qualityJsonPath" -ForegroundColor Green

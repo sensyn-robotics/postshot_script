@@ -87,14 +87,27 @@ $env:PATH = "$(Join-Path $colmapRootDir 'bin');$env:PATH"
 $env:QT_PLUGIN_PATH = Join-Path $colmapRootDir "plugins"
 
 # Export sparse model to PLY using colmap model_converter
+# NOTE: PLY is exported to colmap/ dir (NOT inside sparse/N/) to avoid confusing Postshot-cli
+# which would try to read it and fail with "PlyReader: unexpected table size"
 function Export-SparsePly {
-    param([string]$ReconPath)
+    param(
+        [string]$ReconPath,
+        [string]$OutputDir
+    )
 
-    $plyPath = Join-Path $ReconPath "points3D.ply"
+    $reconName = Split-Path -Leaf $ReconPath
+    $plyPath = Join-Path $OutputDir "sparse_${reconName}_points3D.ply"
     if (Test-Path -LiteralPath $plyPath) {
         $plySizeMB = [math]::Round((Get-Item -LiteralPath $plyPath).Length / 1MB, 2)
         Write-Host "  PLY already exists: $plyPath ($plySizeMB MB)" -ForegroundColor Yellow
         return
+    }
+
+    # Remove any stale PLY from inside sparse/N/ (legacy location that breaks Postshot)
+    $legacyPly = Join-Path $ReconPath "points3D.ply"
+    if (Test-Path -LiteralPath $legacyPly) {
+        Write-Host "  Removing legacy PLY from sparse dir (breaks Postshot): $legacyPly" -ForegroundColor Yellow
+        Remove-Item -LiteralPath $legacyPly -Force
     }
 
     Write-Host "  Exporting sparse model to PLY..." -ForegroundColor Cyan
@@ -136,7 +149,7 @@ if (Test-Path -LiteralPath $sparseDir) {
             }
             if ($validRecon) {
                 Write-Host "  Skipping mapper (overwrite_result=false)" -ForegroundColor Yellow
-                Export-SparsePly -ReconPath $recon.FullName
+                Export-SparsePly -ReconPath $recon.FullName -OutputDir $colmapDir
                 Write-Host ""
                 Write-Host "Stage 5 Complete (skipped - reconstruction exists)" -ForegroundColor Green
                 exit 0
@@ -241,7 +254,7 @@ if (-not $largestRecon) {
 Write-Host "  Selected reconstruction: $($largestRecon.Name)" -ForegroundColor Green
 
 # Export PLY
-Export-SparsePly -ReconPath $largestRecon.FullName
+Export-SparsePly -ReconPath $largestRecon.FullName -OutputDir $colmapDir
 
 # Save visualization (simple point cloud stats for now)
 $vizInfoFile = Join-Path $vizDir "reconstruction_info.txt"

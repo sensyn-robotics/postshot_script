@@ -21,6 +21,7 @@ Desktop.ini
 # Python
 __pycache__/
 *.pyc
+.venv/
 
 # IDE
 .vscode/
@@ -38,3 +39,4 @@ data/
 *credentials*
 *secret*
 *.key
+main.py

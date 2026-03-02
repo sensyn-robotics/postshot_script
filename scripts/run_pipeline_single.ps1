@@ -40,6 +40,7 @@ $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
 
 # Read quality gate settings
 $minSsim = 0.80
+$maxLpips = 0.0  # 0 = disabled (LPIPS not checked unless configured)
 $retryStrategy = @(
     @{ fps = 2; scale = 1.0 },
     @{ fps = 1; scale = 1.0 },
@@ -51,6 +52,9 @@ $retryStrategy = @(
 if ($config.PSObject.Properties['quality_gate']) {
     if ($config.quality_gate.PSObject.Properties['min_ssim']) {
         $minSsim = $config.quality_gate.min_ssim
+    }
+    if ($config.quality_gate.PSObject.Properties['max_lpips']) {
+        $maxLpips = $config.quality_gate.max_lpips
     }
     if ($config.quality_gate.PSObject.Properties['retry_strategy']) {
         $retryStrategy = @()
@@ -222,6 +226,20 @@ function Run-StagesForScene {
 
     $stagesDir = Join-Path $PSScriptRoot "stages"
 
+    # Timing log: collect per-stage timing data
+    $outputDir = Join-Path $ScenePath $config.output.dir_name
+    $timingLogPath = Join-Path $outputDir "timing.json"
+    $timingEntries = @()
+
+    # Load existing timing entries if resuming
+    if (Test-Path -LiteralPath $timingLogPath) {
+        try {
+            $timingEntries = @(Get-Content $timingLogPath -Raw | ConvertFrom-Json)
+        } catch {
+            $timingEntries = @()
+        }
+    }
+
     for ($i = $StartStage; $i -le $EndStage; $i++) {
         $stage = $stages[$i - 1]
 
@@ -275,7 +293,26 @@ function Run-StagesForScene {
         }
 
         $stageExitCode = $LASTEXITCODE
-        $stageDuration = (Get-Date) - $stageStartTime
+        $stageEndTime = Get-Date
+        $stageDuration = $stageEndTime - $stageStartTime
+
+        # Record timing
+        $timingEntry = @{
+            stage       = $i
+            name        = $stage.Description
+            start       = $stageStartTime.ToString('yyyy-MM-dd HH:mm:ss')
+            end         = $stageEndTime.ToString('yyyy-MM-dd HH:mm:ss')
+            duration_s  = [math]::Round($stageDuration.TotalSeconds, 1)
+            duration    = $stageDuration.ToString('hh\:mm\:ss')
+            exit_code   = $stageExitCode
+        }
+        $timingEntries += $timingEntry
+
+        # Save timing log after each stage (so partial results are preserved on failure)
+        if (-not (Test-Path -LiteralPath $outputDir)) {
+            New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+        }
+        $timingEntries | ConvertTo-Json -Depth 3 | Set-Content -Path $timingLogPath -Encoding UTF8
 
         if ($stageExitCode -ne 0) {
             Write-Host "!!! Stage $i FAILED with exit code $stageExitCode" -ForegroundColor Red
@@ -318,7 +355,8 @@ function Check-QualityGate {
     param(
         [string]$ScenePath,
         [object]$Config,
-        [double]$MinSsim
+        [double]$MinSsim,
+        [double]$MaxLpips = 0
     )
 
     $outputDir = Join-Path $ScenePath $Config.output.dir_name
@@ -327,17 +365,30 @@ function Check-QualityGate {
 
     if (-not (Test-Path -LiteralPath $qualityJsonPath)) {
         Write-Host "  quality.json not found - cannot check quality gate" -ForegroundColor Yellow
-        return @{ passed = $false; ssim = 0; reason = "quality.json not found" }
+        return @{ passed = $false; ssim = 0; lpips = 0; reason = "quality.json not found" }
     }
 
     $qualityData = Get-Content $qualityJsonPath -Raw | ConvertFrom-Json
 
+    # Check LPIPS first (primary perceptual metric) if configured
+    if ($MaxLpips -gt 0 -and $qualityData.PSObject.Properties['lpips']) {
+        $lpips = [double]$qualityData.lpips
+        $ssim = if ($qualityData.PSObject.Properties['ssim']) { [double]$qualityData.ssim } else { 0 }
+        if ($lpips -le $MaxLpips) {
+            return @{ passed = $true; ssim = $ssim; lpips = $lpips; reason = "LPIPS $lpips <= $MaxLpips (SSIM=$ssim)" }
+        } else {
+            return @{ passed = $false; ssim = $ssim; lpips = $lpips; reason = "LPIPS $lpips > $MaxLpips (SSIM=$ssim)" }
+        }
+    }
+
+    # Fallback to SSIM if LPIPS unavailable or not configured
     if ($qualityData.PSObject.Properties['ssim']) {
         $ssim = [double]$qualityData.ssim
+        $lpips = if ($qualityData.PSObject.Properties['lpips']) { [double]$qualityData.lpips } else { 0 }
         if ($ssim -ge $MinSsim) {
-            return @{ passed = $true; ssim = $ssim; reason = "SSIM $ssim >= $MinSsim" }
+            return @{ passed = $true; ssim = $ssim; lpips = $lpips; reason = "SSIM $ssim >= $MinSsim$(if ($lpips -gt 0) { " (LPIPS=$lpips)" })" }
         } else {
-            return @{ passed = $false; ssim = $ssim; reason = "SSIM $ssim < $MinSsim" }
+            return @{ passed = $false; ssim = $ssim; lpips = $lpips; reason = "SSIM $ssim < $MinSsim$(if ($lpips -gt 0) { " (LPIPS=$lpips)" })" }
         }
     }
 
@@ -345,15 +396,15 @@ function Check-QualityGate {
     if ($qualityData.PSObject.Properties['psnr']) {
         $psnr = [double]$qualityData.psnr
         if ($psnr -gt 20) {
-            return @{ passed = $true; ssim = 0; reason = "PSNR $psnr > 20 (SSIM unavailable)" }
+            return @{ passed = $true; ssim = 0; lpips = 0; reason = "PSNR $psnr > 20 (SSIM unavailable)" }
         } else {
-            return @{ passed = $false; ssim = 0; reason = "PSNR $psnr <= 20 (SSIM unavailable)" }
+            return @{ passed = $false; ssim = 0; lpips = 0; reason = "PSNR $psnr <= 20 (SSIM unavailable)" }
         }
     }
 
     # No quality metric available - cannot verify
     Write-Host "  No quality metric found in quality.json" -ForegroundColor Yellow
-    return @{ passed = $false; ssim = 0; reason = "No quality metric available" }
+    return @{ passed = $false; ssim = 0; lpips = 0; reason = "No quality metric available" }
 }
 
 # Function to check if path contains non-ASCII characters
@@ -394,6 +445,7 @@ function Process-SceneWithRetry {
         [int]$StartStage,
         [int]$EndStage,
         [double]$MinSsim,
+        [double]$MaxLpips,
         [array]$RetryStrategy
     )
 
@@ -407,7 +459,7 @@ function Process-SceneWithRetry {
     Write-Host ""
     Write-Host "  Config: $ConfigPath" -ForegroundColor White
     Write-Host "  Scene:  $ScenePath" -ForegroundColor White
-    Write-Host "  Quality gate: SSIM >= $MinSsim" -ForegroundColor White
+    Write-Host "  Quality gate: $(if ($MaxLpips -gt 0) { "LPIPS <= $MaxLpips (primary), " })SSIM >= $MinSsim" -ForegroundColor White
     Write-Host "  Max attempts: $($RetryStrategy.Count)" -ForegroundColor White
 
     # Create ASCII junction if path contains non-ASCII characters
@@ -433,7 +485,7 @@ function Process-SceneWithRetry {
         }
 
         if (-not $overwrite) {
-            $existingCheck = Check-QualityGate -ScenePath $workingScenePath -Config $config -MinSsim $MinSsim
+            $existingCheck = Check-QualityGate -ScenePath $workingScenePath -Config $config -MinSsim $MinSsim -MaxLpips $maxLpips
             if ($existingCheck.passed) {
                 Write-Host "  Scene already passes quality gate: $($existingCheck.reason)" -ForegroundColor Green
                 Write-Host "  Skipping (overwrite_result=false)" -ForegroundColor Yellow
@@ -483,23 +535,17 @@ function Process-SceneWithRetry {
                 $effectiveStartStage = $StartStage
 
                 if ($sameImages) {
-                    # Determine which stages actually need re-running based on diagnosis
                     $diagnosis = Get-FailureDiagnosis -ScenePath $workingScenePath -Config $config
                     Write-Host "  Diagnosis: $($diagnosis.message)" -ForegroundColor Yellow
 
-                    # Only clean COLMAP + later if images are the same
+                    # Clean COLMAP + postshot + viz (preserving images)
                     Clean-OutputForRetry -ScenePath $workingScenePath -Config $config -PreserveImages $true
 
-                    # Start from the earliest failing stage
-                    switch ($diagnosis.stage) {
-                        "features" { $effectiveStartStage = [math]::Max($StartStage, 3) }
-                        "matching" { $effectiveStartStage = [math]::Max($StartStage, 3) }
-                        "mapper"   { $effectiveStartStage = [math]::Max($StartStage, 3) }
-                        "train"    { $effectiveStartStage = [math]::Max($StartStage, 6) }
-                        "export"   { $effectiveStartStage = [math]::Max($StartStage, 7) }
-                        default    { $effectiveStartStage = $StartStage }
-                    }
-                    Write-Host "  Resuming from stage $effectiveStartStage (images preserved)" -ForegroundColor Yellow
+                    # COLMAP dirs were cleaned, so always re-run from stage 3
+                    # (previous bug: diagnosis might say "train failed" → stage 6,
+                    #  but COLMAP data was already cleaned above)
+                    $effectiveStartStage = [math]::Max($StartStage, 3)
+                    Write-Host "  Resuming from stage $effectiveStartStage (images preserved, COLMAP re-run)" -ForegroundColor Yellow
                 } else {
                     Clean-OutputForRetry -ScenePath $workingScenePath -Config $config -PreserveImages ($StartStage -gt 1)
                     $effectiveStartStage = $StartStage
@@ -543,7 +589,7 @@ function Process-SceneWithRetry {
             }
 
             # Check quality gate
-            $qualityResult = Check-QualityGate -ScenePath $workingScenePath -Config $config -MinSsim $MinSsim
+            $qualityResult = Check-QualityGate -ScenePath $workingScenePath -Config $config -MinSsim $MinSsim -MaxLpips $maxLpips
 
             if ($qualityResult.passed) {
                 $sceneDuration = (Get-Date) - $sceneStartTime
@@ -596,7 +642,7 @@ Write-Host "#                                                      #" -Foregroun
 Write-Host "########################################################" -ForegroundColor Magenta
 Write-Host ""
 Write-Host "  Config: $ConfigPath" -ForegroundColor White
-Write-Host "  Quality gate: SSIM >= $minSsim" -ForegroundColor White
+Write-Host "  Quality gate: $(if ($maxLpips -gt 0) { "LPIPS <= $maxLpips (primary), " })SSIM >= $minSsim" -ForegroundColor White
 Write-Host "  Retry levels: $($retryStrategy.Count)" -ForegroundColor White
 for ($i = 0; $i -lt $retryStrategy.Count; $i++) {
     $s = $retryStrategy[$i]
@@ -658,6 +704,7 @@ foreach ($scene in $scenesToProcess) {
         -StartStage $StartStage `
         -EndStage $EndStage `
         -MinSsim $minSsim `
+        -MaxLpips $maxLpips `
         -RetryStrategy $retryStrategy
 
     if ($result) {

@@ -7,7 +7,7 @@
     "scene_path": ""
   },
   "output": {
-    "dir_name": "output",
+    "dir_name": "output_sequential",
     "images_subdir": "images",
     "colmap_subdir": "colmap",
     "postshot_subdir": "postshot",
@@ -40,13 +40,13 @@
     "max_features": 8192
   },
   "stage_04_matching": {
-    "type": "exhaustive",
+    "type": "sequential",
     "overlap": 20,
     "sift_max_ratio": 0.7,
-    "loop_detection": false,
+    "loop_detection": true,
     "loop_detection_period": 10,
     "loop_detection_num_images": 50,
-    "guided_matching": false
+    "guided_matching": true
   },
   "stage_05_mapper": {
     "multiple_models": true,
@@ -78,14 +78,14 @@
     "max_lpips": 0.18,
     "retry_strategy": [
       {
-        "name": "exhaustive_1fps",
-        "description": "Exhaustive matcher, 1fps, 8192 features, strict SIFT",
+        "name": "sequential_1fps",
+        "description": "Sequential matcher + loop detection + guided matching, 1fps, strict SIFT",
         "fps": 1,
         "scale": 1.0,
         "max_features": 8192,
-        "matcher_type": "exhaustive",
-        "loop_detection": false,
-        "guided_matching": false
+        "matcher_type": "sequential",
+        "loop_detection": true,
+        "guided_matching": true
       }
     ]
   }
