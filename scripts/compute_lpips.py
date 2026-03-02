@@ -206,7 +206,7 @@ def render_gsplat(gaussians, viewmat, K, width, height, device="cuda"):
     colors = torch.zeros(num_gaussians, total_sh, 3, device=device)
     colors[:, 0, :] = sh_dc
     if num_rest > 0:
-        sh_rest_reshaped = sh_rest.reshape(N, num_rest, 3)
+        sh_rest_reshaped = sh_rest.reshape(num_gaussians, num_rest, 3)
         colors[:, 1:1+num_rest, :] = sh_rest_reshaped
 
     # viewmat: (4, 4) → (1, 4, 4)
