@@ -64,7 +64,7 @@
     "save_visualization": true,
     "train_camera": "all",
     "anti_aliasing": true,
-    "train_steps_limit": 30,
+    "train_steps_limit": 0,
     "max_num_features": 8,
     "max_sh_degree": 3,
     "max_image_size": 3840,

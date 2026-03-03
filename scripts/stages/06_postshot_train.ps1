@@ -223,7 +223,7 @@ $PlainTextPassword = $MarshalType::PtrToStringAuto($BSTR)
 try {
     # Read quality parameters from config (with defaults)
     $antiAliasing = $true
-    $trainStepsLimit = 50
+    $trainStepsLimit = 0  # 0 = auto (let Postshot decide based on image count)
     $maxNumFeatures = 16
     $maxShDegree = 3
     $maxImageSize = 3840
@@ -242,7 +242,7 @@ try {
     Write-Host ""
     Write-Host "  Quality settings:" -ForegroundColor Cyan
     Write-Host "    anti-aliasing:     $antiAliasing" -ForegroundColor White
-    Write-Host "    train-steps-limit: ${trainStepsLimit}k steps" -ForegroundColor White
+    Write-Host "    train-steps-limit: $(if ($trainStepsLimit -gt 0) { "${trainStepsLimit}k steps" } else { 'auto' })" -ForegroundColor White
     Write-Host "    max-num-features:  ${maxNumFeatures}k" -ForegroundColor White
     Write-Host "    max-sh-degree:     $maxShDegree" -ForegroundColor White
     Write-Host "    max-image-size:    $maxImageSize px" -ForegroundColor White
@@ -268,7 +268,8 @@ try {
 
         if ($attempt -gt 0) {
             Write-Host ""
-            Write-Host "  OOM fallback attempt $($attempt + 1)/4: max_image_size=$($settings.max_image_size), max_num_features=$($settings.max_num_features)k, train_steps_limit=$($settings.train_steps_limit)k" -ForegroundColor Yellow
+            $stepsInfo = if ($settings.train_steps_limit -gt 0) { "train_steps_limit=$($settings.train_steps_limit)k" } else { "train_steps_limit=auto" }
+            Write-Host "  OOM fallback attempt $($attempt + 1)/4: max_image_size=$($settings.max_image_size), max_num_features=$($settings.max_num_features)k, $stepsInfo" -ForegroundColor Yellow
             if (Test-Path -LiteralPath $pshtPath) {
                 Remove-Item -LiteralPath $pshtPath -Force -ErrorAction SilentlyContinue
             }
@@ -278,13 +279,16 @@ try {
         $argsString = "--login `"$($Cred.UserName)`" --password `"$PlainTextPassword`" train"
         $argsString += " -i `"$trainImagesDir`" -i `"$sparsePath`" -o `"$pshtPath`""
         $argsString += " --anti-aliasing $($antiAliasing.ToString().ToLower())"
-        $argsString += " --train-steps-limit $($settings.train_steps_limit)"
+        if ($settings.train_steps_limit -gt 0) {
+            $argsString += " --train-steps-limit $($settings.train_steps_limit)"
+        }
         $argsString += " --max-num-features $($settings.max_num_features)"
         $argsString += " --max-sh-degree $maxShDegree"
         $argsString += " --max-image-size $($settings.max_image_size)"
         if ($showTrainError) { $argsString += " --show-train-error" }
 
-        $displayCmd = "postshot-cli train --anti-aliasing $($antiAliasing.ToString().ToLower()) --train-steps-limit $($settings.train_steps_limit) --max-num-features $($settings.max_num_features) --max-sh-degree $maxShDegree --max-image-size $($settings.max_image_size)$(if ($showTrainError) { ' --show-train-error' })"
+        $stepsDisplay = if ($settings.train_steps_limit -gt 0) { " --train-steps-limit $($settings.train_steps_limit)" } else { "" }
+        $displayCmd = "postshot-cli train --anti-aliasing $($antiAliasing.ToString().ToLower())$stepsDisplay --max-num-features $($settings.max_num_features) --max-sh-degree $maxShDegree --max-image-size $($settings.max_image_size)$(if ($showTrainError) { ' --show-train-error' })"
 
         Write-Host ""
         Write-Host "  Starting Postshot training..." -ForegroundColor Cyan
@@ -485,7 +489,7 @@ try {
     $qualityJsonPath = Join-Path $postshotDir "quality.json"
     $qualityData = @{
         metric_name = $qualityMetricName
-        steps = if ($usedSettings) { $usedSettings.train_steps_limit * 1000 } else { $trainStepsLimit * 1000 }
+        steps = if ($usedSettings -and $usedSettings.train_steps_limit -gt 0) { $usedSettings.train_steps_limit * 1000 } elseif ($trainStepsLimit -gt 0) { $trainStepsLimit * 1000 } else { "auto" }
     }
     if ($qualityMetricName -eq "SSIM") {
         $qualityData.ssim = [double]$qualityMetric
@@ -499,7 +503,8 @@ try {
     Write-Host "  Quality data saved to: $qualityJsonPath" -ForegroundColor Green
 
     # Save training info with quality settings and PSNR
-    $settingsUsed = if ($usedSettings) { "max_image_size=$($usedSettings.max_image_size), max_num_features=$($usedSettings.max_num_features)k, train_steps_limit=$($usedSettings.train_steps_limit)k" } else { "defaults" }
+    $stepsUsedInfo = if ($usedSettings -and $usedSettings.train_steps_limit -gt 0) { "$($usedSettings.train_steps_limit)k" } elseif ($trainStepsLimit -gt 0) { "${trainStepsLimit}k" } else { "auto" }
+    $settingsUsed = if ($usedSettings) { "max_image_size=$($usedSettings.max_image_size), max_num_features=$($usedSettings.max_num_features)k, train_steps_limit=$stepsUsedInfo" } else { "defaults" }
     $trainInfo = @"
 Postshot Training Summary
 =========================
@@ -511,7 +516,7 @@ Output: $pshtPath
 Quality Settings
 ----------------
 anti-aliasing: $antiAliasing
-train-steps-limit: ${trainStepsLimit}k steps
+train-steps-limit: $(if ($trainStepsLimit -gt 0) { "${trainStepsLimit}k steps" } else { "auto" })
 max-num-features: ${maxNumFeatures}k
 max-sh-degree: $maxShDegree
 max-image-size: $(if ($usedSettings) { $usedSettings.max_image_size } else { $maxImageSize }) px (configured: $maxImageSize)
