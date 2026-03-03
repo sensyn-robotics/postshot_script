@@ -50,12 +50,12 @@
   },
   "stage_05_mapper": {
     "multiple_models": true,
-    "min_model_size": 50,
+    "min_model_size": 10,
     "ba_global_max_iterations": 50,
-    "ba_local_max_iterations": 15,
-    "init_min_num_inliers": 50,
-    "abs_pose_min_num_inliers": 15,
-    "abs_pose_min_inlier_ratio": 0.15,
+    "ba_local_max_iterations": 25,
+    "init_min_num_inliers": 100,
+    "abs_pose_min_num_inliers": 30,
+    "abs_pose_min_inlier_ratio": 0.25,
     "visualization_interval_minutes": 10
   },
   "stage_06_train": {
@@ -65,7 +65,7 @@
     "train_camera": "all",
     "anti_aliasing": true,
     "train_steps_limit": 30,
-    "max_num_features": 16,
+    "max_num_features": 8,
     "max_sh_degree": 3,
     "max_image_size": 3840,
     "show_train_error": true
