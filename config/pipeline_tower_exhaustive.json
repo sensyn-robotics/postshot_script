@@ -42,7 +42,7 @@
   "stage_04_matching": {
     "type": "exhaustive",
     "overlap": 20,
-    "sift_max_ratio": 0.7,
+    "sift_max_ratio": 0.8,
     "loop_detection": false,
     "loop_detection_period": 10,
     "loop_detection_num_images": 50,
@@ -64,7 +64,7 @@
     "save_visualization": true,
     "train_camera": "all",
     "anti_aliasing": true,
-    "train_steps_limit": 100,
+    "train_steps_limit": 30,
     "max_num_features": 16,
     "max_sh_degree": 3,
     "max_image_size": 3840,
