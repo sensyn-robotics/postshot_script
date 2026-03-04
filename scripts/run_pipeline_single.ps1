@@ -231,6 +231,14 @@ function Run-StagesForScene {
     $timingLogPath = Join-Path $outputDir "timing.json"
     $timingEntries = @()
 
+    # Save pipeline config to output directory
+    if (-not (Test-Path -LiteralPath $outputDir)) {
+        New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+    }
+    $savedConfigPath = Join-Path $outputDir "pipeline_config.json"
+    Copy-Item -LiteralPath $ConfigPath -Destination $savedConfigPath -Force
+    Write-Host "  Config saved to: $savedConfigPath" -ForegroundColor DarkGray
+
     # Load existing timing entries if resuming
     if (Test-Path -LiteralPath $timingLogPath) {
         try {

@@ -116,6 +116,14 @@ function Run-PipelineForScene {
     $sceneStartTime = Get-Date
     $stagesDir = Join-Path $PSScriptRoot "stages"
 
+    # Save pipeline config to output directory
+    if (-not (Test-Path -LiteralPath $outputDir)) {
+        New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+    }
+    $savedConfigPath = Join-Path $outputDir "pipeline_config.json"
+    Copy-Item -LiteralPath $ConfigPath -Destination $savedConfigPath -Force
+    Write-Host "  Config saved to: $savedConfigPath" -ForegroundColor DarkGray
+
     # Run stages
     for ($i = $StartStage; $i -le $EndStage; $i++) {
         $stage = $stages[$i - 1]
