@@ -421,7 +421,7 @@ try {
             $saveViz = $config.stage_06_train.save_visualization
         }
 
-        if ($saveViz -and (Test-Path -LiteralPath $pythonExe)) {
+        if ($saveViz) {
             Write-Host ""
             Write-Host "  Generating visualizations..." -ForegroundColor Cyan
 
@@ -435,14 +435,13 @@ try {
                     $checkpointNum = $checkpoints[-1]  # Last checkpoint
                 }
 
-                $vizArgs = @(
-                    $renderScript,
-                    $plyPath,
-                    $vizDir,
-                    $checkpointNum
-                )
-
-                & $pythonExe $vizArgs
+                # Prefer "uv run python" if uv is available, else fall back to $pythonExe
+                $uvExe = Get-Command "uv" -ErrorAction SilentlyContinue
+                if ($uvExe) {
+                    & $uvExe.Source run python $renderScript $plyPath $vizDir $checkpointNum
+                } else {
+                    & $pythonExe $renderScript $plyPath $vizDir $checkpointNum
+                }
 
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "  Visualizations saved to: $vizDir" -ForegroundColor Green
