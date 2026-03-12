@@ -50,6 +50,8 @@
   },
   "stage_05_mapper": {
     "multiple_models": true,
+    "merge_models": false,
+    "quality_gate": false,
     "min_model_size": 10,
     "ba_global_max_iterations": 50,
     "ba_local_max_iterations": 25,

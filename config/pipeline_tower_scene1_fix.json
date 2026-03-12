@@ -1,0 +1,134 @@
+{
+    "pipeline": {
+        "overwrite_result": true,
+        "test_data_path": "C:\\postshot_script\\data\\tower"
+    },
+    "input": {
+        "scene_path": ""
+    },
+    "output": {
+        "dir_name": "output_fixed",
+        "images_subdir": "images",
+        "colmap_subdir": "colmap",
+        "postshot_subdir": "postshot",
+        "visualizations_subdir": "visualizations"
+    },
+    "paths": {
+        "ffmpeg": "C:\\ffmpeg\\bin\\ffmpeg.exe",
+        "ffprobe": "C:\\ffmpeg\\bin\\ffprobe.exe",
+        "colmap": "C:\\COLMAP\\COLMAP.bat",
+        "postshot_cli": "C:\\Program Files\\Jawset Postshot\\bin\\postshot-cli.exe",
+        "python": "python",
+        "temp": "C:\\Postshot_Temp"
+    },
+    "stage_01_extract": {
+        "fps": 2,
+        "target_frames": 0,
+        "format": "png",
+        "quality": 2
+    },
+    "stage_02_filter": {
+        "enabled": false,
+        "blur_threshold": "auto",
+        "target_overlap": 0.99,
+        "max_frames": 600
+    },
+    "stage_03_features": {
+        "camera_model": "SIMPLE_RADIAL",
+        "single_camera": true,
+        "single_camera_per_folder": false,
+        "max_features": 8192
+    },
+    "stage_04_matching": {
+        "type": "sequential",
+        "overlap": 20,
+        "sift_max_ratio": 0.8,
+        "loop_detection": true,
+        "loop_detection_period": 10,
+        "loop_detection_num_images": 50,
+        "guided_matching": true
+    },
+    "stage_05_mapper": {
+        "multiple_models": true,
+        "merge_models": true,
+        "quality_gate": true,
+        "min_model_size": 10,
+        "ba_global_max_iterations": 50,
+        "ba_local_max_iterations": 25,
+        "init_min_num_inliers": 100,
+        "abs_pose_min_num_inliers": 30,
+        "abs_pose_min_inlier_ratio": 0.25,
+        "visualization_interval_minutes": 10
+    },
+    "stage_06_train": {
+        "checkpoints": [10000, 30000],
+        "profile": "Splat3",
+        "save_visualization": true,
+        "train_camera": "all",
+        "anti_aliasing": true,
+        "train_steps_limit": 0,
+        "max_num_features": 8,
+        "max_sh_degree": 3,
+        "max_image_size": 3840,
+        "show_train_error": true
+    },
+    "stage_07_export": {
+        "format": "ply"
+    },
+    "quality_gate": {
+        "min_ssim": 0.80,
+        "max_lpips": 0.0,
+        "retry_strategy": [
+            {
+                "name": "seq_2fps_loop_guided_merge",
+                "description": "Sequential + loop detection + guided matching + merge",
+                "fps": 2,
+                "scale": 1.0,
+                "target_frames": 0,
+                "max_features": 8192,
+                "matcher_type": "sequential",
+                "sequential_overlap": 20,
+                "loop_detection": "true",
+                "guided_matching": "true"
+            },
+            {
+                "name": "exhaustive_2fps_merge",
+                "description": "Exhaustive matcher + merge",
+                "fps": 2,
+                "scale": 1.0,
+                "target_frames": 0,
+                "max_features": 8192,
+                "matcher_type": "exhaustive",
+                "loop_detection": "false",
+                "guided_matching": "false"
+            },
+            {
+                "name": "seq_2fps_relaxed_merge",
+                "description": "Sequential + relaxed mapper params + merge",
+                "fps": 2,
+                "scale": 1.0,
+                "target_frames": 0,
+                "max_features": 8192,
+                "matcher_type": "sequential",
+                "sequential_overlap": 20,
+                "loop_detection": "true",
+                "guided_matching": "true",
+                "min_model_size": 10,
+                "init_min_num_inliers": 50,
+                "abs_pose_min_num_inliers": 15,
+                "abs_pose_min_inlier_ratio": 0.1
+            },
+            {
+                "name": "exhaustive_1fps",
+                "description": "Exhaustive at 1fps (more frames, brute force)",
+                "fps": 1,
+                "scale": 1.0,
+                "target_frames": 0,
+                "max_features": 8192,
+                "matcher_type": "exhaustive",
+                "loop_detection": "false",
+                "guided_matching": "false"
+            }
+        ]
+    }
+}

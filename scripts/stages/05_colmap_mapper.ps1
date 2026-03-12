@@ -230,6 +230,125 @@ if ($reconFolders.Count -eq 0) {
 
 Write-Host "  Found $($reconFolders.Count) reconstruction(s)" -ForegroundColor Cyan
 
+# === COLMAP Quality Gate Config ===
+$colmapQualityGate = $false
+if ($config.stage_05_mapper.PSObject.Properties['quality_gate']) {
+    $colmapQualityGate = $config.stage_05_mapper.quality_gate
+}
+
+$mergeModels = $false
+if ($config.stage_05_mapper.PSObject.Properties['merge_models']) {
+    $mergeModels = $config.stage_05_mapper.merge_models
+}
+
+# === Auto-merge if multiple models and merge_models enabled ===
+if ($mergeModels -and $reconFolders.Count -gt 1) {
+    Write-Host ""
+    Write-Host "  Auto-merge: $($reconFolders.Count) models detected, merging..." -ForegroundColor Yellow
+
+    $sortedRecons = $reconFolders | Sort-Object Name
+    $currentInput = $sortedRecons[0].FullName
+    $mergeDir = Join-Path $sparseDir "merge_temp"
+
+    for ($mi = 1; $mi -lt $sortedRecons.Count; $mi++) {
+        $nextRecon = $sortedRecons[$mi].FullName
+        $tempOutput = Join-Path $mergeDir "step_$mi"
+
+        if (Test-Path -LiteralPath $tempOutput) {
+            Remove-Item -LiteralPath $tempOutput -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path $tempOutput -Force | Out-Null
+
+        Write-Host "    Merging model $($sortedRecons[$mi].Name) into accumulated result..." -ForegroundColor Gray
+
+        $mergeArgs = @(
+            "model_merger",
+            "--input_path1", $currentInput,
+            "--input_path2", $nextRecon,
+            "--output_path", $tempOutput
+        )
+
+        $mergeProcess = Start-Process -FilePath $colmapBin -ArgumentList $mergeArgs -NoNewWindow -Wait -PassThru
+
+        $mergeOutputImages = Join-Path $tempOutput "images.bin"
+        if ($mergeProcess.ExitCode -eq 0 -and (Test-Path -LiteralPath $mergeOutputImages)) {
+            $currentInput = $tempOutput
+            Write-Host "    Merge step $mi successful" -ForegroundColor Green
+        } else {
+            Write-Host "    Merge step $mi failed (model $($sortedRecons[$mi].Name) skipped)" -ForegroundColor Yellow
+        }
+    }
+
+    # Run image_registrator on merged model to register remaining images
+    Write-Host "    Running image_registrator on merged model..." -ForegroundColor Cyan
+    $registratorOutput = Join-Path $mergeDir "registered"
+    if (Test-Path -LiteralPath $registratorOutput) {
+        Remove-Item -LiteralPath $registratorOutput -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $registratorOutput -Force | Out-Null
+
+    # Copy current merged model to registrator input
+    Copy-Item -LiteralPath (Join-Path $currentInput "*") -Destination $registratorOutput -Recurse -Force
+
+    $regArgs = @(
+        "image_registrator",
+        "--database_path", $databasePath,
+        "--input_path", $registratorOutput,
+        "--output_path", $registratorOutput,
+        "--Mapper.abs_pose_min_num_inliers=10",
+        "--Mapper.abs_pose_min_inlier_ratio=0.1"
+    )
+
+    $regProcess = Start-Process -FilePath $colmapBin -ArgumentList $regArgs -NoNewWindow -Wait -PassThru
+    if ($regProcess.ExitCode -eq 0) {
+        Write-Host "    Image registrator completed" -ForegroundColor Green
+    } else {
+        Write-Host "    Image registrator failed (continuing with merged model)" -ForegroundColor Yellow
+    }
+
+    # Run bundle_adjuster to refine
+    Write-Host "    Running bundle_adjuster on merged model..." -ForegroundColor Cyan
+    $baArgs = @(
+        "bundle_adjuster",
+        "--input_path", $registratorOutput,
+        "--output_path", $registratorOutput
+    )
+
+    $baProcess = Start-Process -FilePath $colmapBin -ArgumentList $baArgs -NoNewWindow -Wait -PassThru
+    if ($baProcess.ExitCode -eq 0) {
+        Write-Host "    Bundle adjustment completed" -ForegroundColor Green
+    } else {
+        Write-Host "    Bundle adjustment failed (continuing with current model)" -ForegroundColor Yellow
+    }
+
+    # Replace sparse/0 with final merged result
+    $finalMergedImages = Join-Path $registratorOutput "images.bin"
+    if (Test-Path -LiteralPath $finalMergedImages) {
+        # Remove all existing reconstruction folders
+        foreach ($recon in $reconFolders) {
+            Remove-Item -LiteralPath $recon.FullName -Recurse -Force
+        }
+
+        # Create sparse/0 with merged result
+        $mergedTarget = Join-Path $sparseDir "0"
+        New-Item -ItemType Directory -Path $mergedTarget -Force | Out-Null
+        Copy-Item -LiteralPath (Join-Path $registratorOutput "*") -Destination $mergedTarget -Recurse -Force
+
+        Write-Host "    Merged model saved to sparse/0" -ForegroundColor Green
+    } else {
+        Write-Host "    WARNING: Merge produced no output, keeping original models" -ForegroundColor Yellow
+    }
+
+    # Clean up merge temp directory
+    if (Test-Path -LiteralPath $mergeDir) {
+        Remove-Item -LiteralPath $mergeDir -Recurse -Force
+    }
+
+    # Re-scan reconstruction folders after merge
+    $reconFolders = Get-ChildItem -LiteralPath $sparseDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^\d+$' }
+    Write-Host "  After merge: $($reconFolders.Count) reconstruction(s)" -ForegroundColor Cyan
+}
+
 # Find largest reconstruction
 $largestRecon = $null
 $largestSize = 0
@@ -252,6 +371,51 @@ if (-not $largestRecon) {
 }
 
 Write-Host "  Selected reconstruction: $($largestRecon.Name)" -ForegroundColor Green
+
+# === COLMAP Quality Gate Check ===
+if ($colmapQualityGate) {
+    $qualityScript = Join-Path (Split-Path $PSScriptRoot) "check_sparse_quality.py"
+    $colmapQualityJson = Join-Path $colmapDir "sparse_quality.json"
+
+    # Count total images from images directory
+    $totalImageCount = (Get-ChildItem -LiteralPath $imagesDir -Recurse -File |
+        Where-Object { $_.Extension -in @('.png','.jpg','.jpeg','.PNG','.JPG','.JPEG') }).Count
+
+    $pythonExe = $config.paths.python
+
+    Write-Host ""
+    Write-Host "  Running COLMAP quality check..." -ForegroundColor Cyan
+    & $pythonExe $qualityScript --sparse $sparseDir --output $colmapQualityJson --total-images $totalImageCount
+
+    if (Test-Path -LiteralPath $colmapQualityJson) {
+        $qualityResult = Get-Content $colmapQualityJson -Raw | ConvertFrom-Json
+
+        Write-Host ""
+        Write-Host "  COLMAP Quality Check:" -ForegroundColor Cyan
+        Write-Host "    Models: $($qualityResult.checks.num_models)" -ForegroundColor White
+        Write-Host "    Registered: $($qualityResult.checks.registered_images)/$($qualityResult.checks.total_images)" -ForegroundColor White
+        if ($qualityResult.checks.structure) {
+            $is3d = if ($qualityResult.checks.structure.is_3d) { 'YES' } else { 'NO (PLANAR!)' }
+            Write-Host "    3D structure: $is3d (ratio=$($qualityResult.checks.structure.planarity_ratio))" -ForegroundColor White
+        }
+        if ($qualityResult.checks.mean_reprojection_error) {
+            Write-Host "    Reprojection error: $($qualityResult.checks.mean_reprojection_error) px" -ForegroundColor White
+        }
+
+        if (-not $qualityResult.pass) {
+            Write-Host ""
+            Write-Host "  COLMAP QUALITY GATE FAILED" -ForegroundColor Red
+            foreach ($reason in $qualityResult.reasons) {
+                Write-Host "    - $reason" -ForegroundColor Red
+            }
+            exit 2  # Exit code 2 = COLMAP quality failure (not crash)
+        }
+
+        Write-Host "    Result: PASS" -ForegroundColor Green
+    } else {
+        Write-Host "  WARNING: Quality check script did not produce output" -ForegroundColor Yellow
+    }
+}
 
 # Export PLY
 Export-SparsePly -ReconPath $largestRecon.FullName -OutputDir $colmapDir
