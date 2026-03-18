@@ -8,6 +8,7 @@
 
 param(
     [int]$StartFrom = 1,
+    [double]$TargetSsim = 0.80,
     [double]$TargetLpips = 0.50,
     [string]$ConfigPath = "config\pipeline_tower_scene1_fix.json"
 )
@@ -26,10 +27,10 @@ $qualityScript = "C:\postshot_script\scripts\check_sparse_quality.py"
 # Exhaustive matching is key for single-model reconstruction.
 # ============================================================
 $strategies = @(
-    # --- Best COLMAP quality from previous experiments ---
+    # --- Already ran (skip with -StartFrom 3) ---
     @{
         name = "11_2fps_exhaustive_16k_merge"
-        desc = "2fps + exhaustive + 16k features + merge (best prev COLMAP)"
+        desc = "2fps + exhaustive + 16k features + merge [ALREADY RAN: COLMAP FAIL]"
         fps = 2; max_features = 16384; matcher = "exhaustive"
         sift_max_ratio = 0.8; guided = $false; loop_det = $false
         merge = $true; camera_model = "SIMPLE_RADIAL"
@@ -37,73 +38,74 @@ $strategies = @(
     },
     @{
         name = "12_2fps_exhaustive_16k_sift07"
-        desc = "2fps + exhaustive + 16k features + strict SIFT 0.7"
+        desc = "2fps + exhaustive + 16k + sift07 [ALREADY RAN: SSIM=0.686 LPIPS=0.734]"
         fps = 2; max_features = 16384; matcher = "exhaustive"
         sift_max_ratio = 0.7; guided = $false; loop_det = $false
         merge = $false; camera_model = "SIMPLE_RADIAL"
         min_model_size = 10; init_inliers = 100; abs_inliers = 30; abs_ratio = 0.25
     },
+    # --- New strategies: focus on more frames + higher features for tower ---
     @{
         name = "13_3fps_exhaustive_16k"
-        desc = "3fps + exhaustive + 16k features (more frames + more features)"
+        desc = "3fps + exhaustive + 16k (more frames, auto train steps)"
         fps = 3; max_features = 16384; matcher = "exhaustive"
         sift_max_ratio = 0.8; guided = $false; loop_det = $false
         merge = $false; camera_model = "SIMPLE_RADIAL"
         min_model_size = 10; init_inliers = 100; abs_inliers = 30; abs_ratio = 0.25
     },
     @{
-        name = "14_2fps_exhaustive_guided_merge"
-        desc = "2fps + exhaustive + guided matching + merge"
-        fps = 2; max_features = 8192; matcher = "exhaustive"
-        sift_max_ratio = 0.8; guided = $true; loop_det = $false
-        merge = $true; camera_model = "SIMPLE_RADIAL"
-        min_model_size = 10; init_inliers = 100; abs_inliers = 30; abs_ratio = 0.25
-    },
-    @{
-        name = "15_2fps_exhaustive_32k"
-        desc = "2fps + exhaustive + 32k features (max features)"
+        name = "14_2fps_exhaustive_32k"
+        desc = "2fps + exhaustive + 32k features (max features for dense points)"
         fps = 2; max_features = 32768; matcher = "exhaustive"
         sift_max_ratio = 0.8; guided = $false; loop_det = $false
         merge = $false; camera_model = "SIMPLE_RADIAL"
         min_model_size = 10; init_inliers = 100; abs_inliers = 30; abs_ratio = 0.25
     },
     @{
-        name = "16_4fps_exhaustive"
-        desc = "4fps + exhaustive (even more frames)"
-        fps = 4; max_features = 8192; matcher = "exhaustive"
-        sift_max_ratio = 0.8; guided = $false; loop_det = $false
-        merge = $false; camera_model = "SIMPLE_RADIAL"
-        min_model_size = 10; init_inliers = 100; abs_inliers = 30; abs_ratio = 0.25
-    },
-    @{
-        name = "17_4fps_exhaustive_16k"
-        desc = "4fps + exhaustive + 16k features"
+        name = "15_4fps_exhaustive_16k"
+        desc = "4fps + exhaustive + 16k (maximum frame coverage)"
         fps = 4; max_features = 16384; matcher = "exhaustive"
         sift_max_ratio = 0.8; guided = $false; loop_det = $false
         merge = $false; camera_model = "SIMPLE_RADIAL"
         min_model_size = 10; init_inliers = 100; abs_inliers = 30; abs_ratio = 0.25
     },
     @{
-        name = "18_2fps_exhaustive_16k_pinhole"
-        desc = "2fps + exhaustive + 16k + PINHOLE camera"
-        fps = 2; max_features = 16384; matcher = "exhaustive"
+        name = "16_3fps_exhaustive_32k"
+        desc = "3fps + exhaustive + 32k features (max frames + max features)"
+        fps = 3; max_features = 32768; matcher = "exhaustive"
         sift_max_ratio = 0.8; guided = $false; loop_det = $false
-        merge = $false; camera_model = "PINHOLE"
+        merge = $false; camera_model = "SIMPLE_RADIAL"
         min_model_size = 10; init_inliers = 100; abs_inliers = 30; abs_ratio = 0.25
     },
     @{
-        name = "19_3fps_exhaustive_sift07_merge"
-        desc = "3fps + exhaustive + sift 0.7 + merge"
-        fps = 3; max_features = 8192; matcher = "exhaustive"
+        name = "17_2fps_exhaustive_32k_sift07"
+        desc = "2fps + exhaustive + 32k + strict SIFT 0.7"
+        fps = 2; max_features = 32768; matcher = "exhaustive"
         sift_max_ratio = 0.7; guided = $false; loop_det = $false
-        merge = $true; camera_model = "SIMPLE_RADIAL"
+        merge = $false; camera_model = "SIMPLE_RADIAL"
         min_model_size = 10; init_inliers = 100; abs_inliers = 30; abs_ratio = 0.25
     },
     @{
-        name = "20_5fps_exhaustive_16k"
-        desc = "5fps + exhaustive + 16k (maximum coverage)"
+        name = "18_5fps_exhaustive_16k"
+        desc = "5fps + exhaustive + 16k (very dense frames)"
         fps = 5; max_features = 16384; matcher = "exhaustive"
         sift_max_ratio = 0.8; guided = $false; loop_det = $false
+        merge = $false; camera_model = "SIMPLE_RADIAL"
+        min_model_size = 10; init_inliers = 100; abs_inliers = 30; abs_ratio = 0.25
+    },
+    @{
+        name = "19_4fps_exhaustive_32k"
+        desc = "4fps + exhaustive + 32k (dense frames + dense features)"
+        fps = 4; max_features = 32768; matcher = "exhaustive"
+        sift_max_ratio = 0.8; guided = $false; loop_det = $false
+        merge = $false; camera_model = "SIMPLE_RADIAL"
+        min_model_size = 10; init_inliers = 100; abs_inliers = 30; abs_ratio = 0.25
+    },
+    @{
+        name = "20_3fps_exhaustive_16k_sift07"
+        desc = "3fps + exhaustive + 16k + strict SIFT 0.7"
+        fps = 3; max_features = 16384; matcher = "exhaustive"
+        sift_max_ratio = 0.7; guided = $false; loop_det = $false
         merge = $false; camera_model = "SIMPLE_RADIAL"
         min_model_size = 10; init_inliers = 100; abs_inliers = 30; abs_ratio = 0.25
     }
@@ -132,6 +134,10 @@ function Build-Config {
     $cfg.stage_05_mapper.init_min_num_inliers = $Strategy.init_inliers
     $cfg.stage_05_mapper.abs_pose_min_num_inliers = $Strategy.abs_inliers
     $cfg.stage_05_mapper.abs_pose_min_inlier_ratio = $Strategy.abs_ratio
+
+    # Use higher training steps for better quality
+    $cfg.stage_06_train.train_steps_limit = 0  # auto (until convergence)
+    $cfg.stage_06_train.max_image_size = 3840
 
     $tempPath = Join-Path $tempBase "config_qloop_$($Strategy.name).json"
     $cfg | ConvertTo-Json -Depth 5 | Set-Content -Path $tempPath -Encoding UTF8
@@ -199,12 +205,18 @@ function Compute-Lpips {
 
     $outputDirName = Split-Path -Leaf $OutputDir
 
-    & uv run python scripts/compute_lpips.py `
+    # Redirect stdout to Write-Host so it doesn't pollute return value
+    # Temporarily allow errors (Python warnings on stderr trigger Stop mode)
+    $prevEA = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $lpipsOutput = & uv run python scripts/compute_lpips.py `
         --ply (Join-Path $junction "$outputDirName\postshot\scene.ply") `
         --sparse ($sparsePath.Replace($scene1, $junction)) `
         --images (Join-Path $junction "$outputDirName\images") `
         --output (Join-Path $junction "$outputDirName\postshot\lpips.json") `
-        --max-images 50
+        --max-images 50 2>&1
+    $ErrorActionPreference = $prevEA
+    $lpipsOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
 
     $lpips = 999.0
     $jLpips = Join-Path $junction "$outputDirName\postshot\lpips.json"
@@ -213,7 +225,7 @@ function Compute-Lpips {
         $lpips = [double]$lData.lpips_mean
     }
     cmd /c "rmdir `"$junction`""
-    return $lpips
+    return [double]$lpips
 }
 
 # ============================================================
@@ -227,7 +239,7 @@ $csvFile = Join-Path (Split-Path $scene1) "scene1_quality_loop_results.csv"
 Write-Host ""
 Write-Host "################################################################" -ForegroundColor Cyan
 Write-Host "#  COLMAP Quality Loop - Scene 1                               #" -ForegroundColor Cyan
-Write-Host "#  Target LPIPS <= $TargetLpips                                     #" -ForegroundColor Cyan
+Write-Host "#  Target SSIM >= $TargetSsim, LPIPS <= $TargetLpips                        #" -ForegroundColor Cyan
 Write-Host "#  Strategies: $($strategies.Count) (starting from #$StartFrom)                         #" -ForegroundColor Cyan
 Write-Host "#  COLMAP quality gate: ENABLED                                #" -ForegroundColor Cyan
 Write-Host "################################################################" -ForegroundColor Cyan
@@ -407,14 +419,16 @@ for ($i = 0; $i -lt $strategies.Count; $i++) {
     }
     $allResults += $result
 
-    $passed = $lpips -le $TargetLpips
+    $ssimPass = $ssim -ge $TargetSsim
+    $lpipsPass = $lpips -le $TargetLpips
+    $passed = $ssimPass -and $lpipsPass
 
     Write-Host ""
     Write-Host "----------------------------------------------------------------" -ForegroundColor $(if ($passed) { "Green" } else { "Yellow" })
     Write-Host "  #$expNum $($strat.name) ($($expDuration.ToString('hh\:mm\:ss')))" -ForegroundColor White
     Write-Host "    COLMAP: PASS (models=$($result.num_models) reg=$($result.registered)/$($result.total_images) PCA=$($result.planarity) reproj=$($result.reproj_err)px pts=$($result.num_points))" -ForegroundColor Green
-    Write-Host "    SSIM:   $ssim" -ForegroundColor White
-    Write-Host "    LPIPS:  $lpips $(if ($passed) { 'PASS' } else { 'FAIL (target <= ' + $TargetLpips + ')' })" -ForegroundColor $(if ($passed) { "Green" } else { "Red" })
+    Write-Host "    SSIM:   $ssim $(if ($ssimPass) { 'PASS' } else { 'FAIL (target >= ' + $TargetSsim + ')' })" -ForegroundColor $(if ($ssimPass) { "Green" } else { "Red" })
+    Write-Host "    LPIPS:  $lpips $(if ($lpipsPass) { 'PASS' } else { 'FAIL (target <= ' + $TargetLpips + ')' })" -ForegroundColor $(if ($lpipsPass) { "Green" } else { "Red" })
     Write-Host "----------------------------------------------------------------" -ForegroundColor $(if ($passed) { "Green" } else { "Yellow" })
 
     # Save results
@@ -434,7 +448,7 @@ for ($i = 0; $i -lt $strategies.Count; $i++) {
         Write-Host ""
         Write-Host "################################################################" -ForegroundColor Green
         Write-Host "#  TARGET ACHIEVED!                                            #" -ForegroundColor Green
-        Write-Host "#  $($strat.name): LPIPS=$lpips SSIM=$ssim" -ForegroundColor Green
+        Write-Host "#  $($strat.name): SSIM=$ssim LPIPS=$lpips" -ForegroundColor Green
         Write-Host "################################################################" -ForegroundColor Green
         break
     }
