@@ -193,12 +193,11 @@ def quat_to_rotmat_batch(quats):
 
 
 def render_gaussians(gaussians, viewmat, K, width, height, device="cuda",
-                     render_size=256):
-    """Render 3DGS using pure PyTorch point splatting.
+                     render_size=512):
+    """Render 3DGS using vectorized 2D gaussian splatting in pure PyTorch.
 
-    Fast approximation: renders each gaussian as a single point (no covariance
-    spread). Since output is resized to 256x256 for LPIPS anyway, this gives
-    sufficient quality for perceptual comparison.
+    Projects 3D gaussians to 2D, computes 2D covariance via EWA splatting,
+    and uses a fixed-size kernel with scatter operations for fast rendering.
 
     Args:
         gaussians: dict from load_ply_3dgs
@@ -206,7 +205,7 @@ def render_gaussians(gaussians, viewmat, K, width, height, device="cuda",
         K: 3x3 intrinsics matrix (torch tensor)
         width, height: original image dimensions
         device: cuda or cpu
-        render_size: output resolution (default 256, matches LPIPS input)
+        render_size: output resolution (default 512)
 
     Returns:
         rendered image as (render_size, render_size, 3) numpy array in [0, 1]
@@ -223,6 +222,8 @@ def render_gaussians(gaussians, viewmat, K, width, height, device="cuda",
     means = torch.from_numpy(gaussians["xyz"]).to(device)
     opacities_logit = torch.from_numpy(gaussians["opacity"]).to(device)
     sh_dc = torch.from_numpy(gaussians["sh_dc"]).to(device)
+    scales_log = torch.from_numpy(gaussians["scales"]).to(device)
+    rotations_raw = torch.from_numpy(gaussians["rotations"]).to(device)
 
     # Transform to camera space
     R = viewmat[:3, :3].to(device)
@@ -234,6 +235,8 @@ def render_gaussians(gaussians, viewmat, K, width, height, device="cuda",
     means_cam = means_cam[valid]
     opacities_logit = opacities_logit[valid]
     sh_dc = sh_dc[valid]
+    scales_log = scales_log[valid]
+    rotations_raw = rotations_raw[valid]
 
     if means_cam.shape[0] == 0:
         return np.zeros((rH, rW, 3), dtype=np.float32)
@@ -241,49 +244,182 @@ def render_gaussians(gaussians, viewmat, K, width, height, device="cuda",
     # Project to 2D
     fx, fy, cx, cy = sK[0, 0], sK[1, 1], sK[0, 2], sK[1, 2]
     z = means_cam[:, 2].clamp(min=0.1)
-    px = (means_cam[:, 0] * fx / z + cx).long()
-    py = (means_cam[:, 1] * fy / z + cy).long()
+    px = means_cam[:, 0] * fx / z + cx  # float pixel coords
+    py = means_cam[:, 1] * fy / z + cy
 
-    # Filter to in-bounds
-    in_bounds = (px >= 0) & (px < rW) & (py >= 0) & (py < rH)
+    # Compute 3D covariance in world space: R_q @ S @ S^T @ R_q^T
+    scales = scales_log.exp()  # (N, 3) - Postshot stores log-scale
+    quats = rotations_raw / rotations_raw.norm(dim=-1, keepdim=True)
+    R_q = quat_to_rotmat_batch(quats)  # (N, 3, 3)
+
+    # M = R_q @ diag(scales)
+    M = R_q * scales.unsqueeze(1)  # (N, 3, 3) * (N, 1, 3) broadcast -> (N, 3, 3)
+    Sigma_world = M @ M.transpose(1, 2)  # (N, 3, 3)
+
+    # Transform covariance to camera space
+    Sigma_cam = R @ Sigma_world @ R.T
+
+    # EWA: Project 3D covariance to 2D using Jacobian of perspective projection
+    tx = means_cam[:, 0]
+    ty = means_cam[:, 1]
+    tz = means_cam[:, 2].clamp(min=0.1)
+
+    J = torch.zeros(means_cam.shape[0], 2, 3, device=device)
+    J[:, 0, 0] = fx / tz
+    J[:, 0, 2] = -fx * tx / (tz * tz)
+    J[:, 1, 1] = fy / tz
+    J[:, 1, 2] = -fy * ty / (tz * tz)
+
+    # 2D covariance
+    cov2D = J @ Sigma_cam @ J.transpose(1, 2)  # (N, 2, 2)
+    cov2D[:, 0, 0] += 0.3  # regularization
+    cov2D[:, 1, 1] += 0.3
+
+    # Inverse of 2D covariance
+    a = cov2D[:, 0, 0]
+    b = cov2D[:, 0, 1]
+    c = cov2D[:, 1, 1]
+    det = (a * c - b * b).clamp(min=1e-6)
+    inv_a = c / det
+    inv_b = -b / det
+    inv_c = a / det
+
+    # Compute gaussian radius (3-sigma)
+    trace = a + c
+    discriminant = ((a - c) ** 2 + 4 * b * b).clamp(min=0).sqrt()
+    lambda_max = 0.5 * (trace + discriminant)
+    radius = (3.0 * lambda_max.clamp(min=0.1).sqrt()).ceil()  # float pixels
+    # Cap radius to reasonable value for performance
+    MAX_RADIUS = 32
+    radius = radius.clamp(max=MAX_RADIUS)
+
+    # Compute colors and opacities
+    opacities = opacities_logit.sigmoid()
+    colors = eval_sh_dc(sh_dc).clamp(0, 1)  # (N, 3)
+
+    # Filter: keep in-bounds and significant gaussians
+    margin = MAX_RADIUS
+    in_bounds = (px > -margin) & (px < rW + margin) & (py > -margin) & (py < rH + margin)
+    # Also filter low-opacity gaussians for speed
+    in_bounds = in_bounds & (opacities > 0.01)
+
     px = px[in_bounds]
     py = py[in_bounds]
     z = z[in_bounds]
-    opacities = opacities_logit[in_bounds].sigmoid()
-    colors = eval_sh_dc(sh_dc[in_bounds]).clamp(0, 1)  # (N, 3)
+    colors = colors[in_bounds]
+    opacities = opacities[in_bounds]
+    inv_a = inv_a[in_bounds]
+    inv_b = inv_b[in_bounds]
+    inv_c = inv_c[in_bounds]
+    radius = radius[in_bounds]
 
     if px.shape[0] == 0:
         return np.zeros((rH, rW, 3), dtype=np.float32)
 
-    # Sort by depth (front to back for proper compositing)
-    sort_idx = z.argsort()
+    # Sort by depth (back to front for simple alpha blending)
+    sort_idx = z.argsort(descending=True)
     px = px[sort_idx]
     py = py[sort_idx]
     colors = colors[sort_idx]
     opacities = opacities[sort_idx]
+    inv_a = inv_a[sort_idx]
+    inv_b = inv_b[sort_idx]
+    inv_c = inv_c[sort_idx]
+    radius = radius[sort_idx]
 
-    # Accumulate: use scatter for speed (approximate compositing)
-    # For each pixel, we want weighted average of gaussian colors
-    pixel_idx = py * rW + px  # (N,)
+    N = px.shape[0]
 
-    # Weight by opacity / depth
-    weights = opacities  # (N,)
+    # Vectorized splatting with fixed kernel
+    # Create kernel offsets: (2K+1)^2 offsets for K = kernel_half
+    KERNEL_HALF = 3  # 7x7 kernel per gaussian
+    offsets = torch.arange(-KERNEL_HALF, KERNEL_HALF + 1, device=device, dtype=torch.float32)
+    dy_grid, dx_grid = torch.meshgrid(offsets, offsets, indexing='ij')
+    dx_grid = dx_grid.reshape(-1)  # (K*K,)
+    dy_grid = dy_grid.reshape(-1)
+    K_size = dx_grid.shape[0]  # 49 for 7x7
 
-    # Use scatter_add for fast accumulation
-    image_flat = torch.zeros(rH * rW, 3, device=device)
-    weight_flat = torch.zeros(rH * rW, 1, device=device)
+    image = torch.zeros(rH, rW, 3, device=device)
+    weight_buf = torch.zeros(rH * rW, 1, device=device)
 
-    # Weighted color accumulation
-    weighted_colors = colors * weights.unsqueeze(-1)  # (N, 3)
-    image_flat.scatter_add_(0, pixel_idx.unsqueeze(-1).expand(-1, 3), weighted_colors)
-    weight_flat.scatter_add_(0, pixel_idx.unsqueeze(-1), weights.unsqueeze(-1))
+    # Process in batches to manage GPU memory
+    BATCH = 200000
+    for start in range(0, N, BATCH):
+        end = min(start + BATCH, N)
+        B = end - start
 
-    # Normalize
-    weight_flat = weight_flat.clamp(min=1e-6)
-    image_flat = image_flat / weight_flat
+        b_px = px[start:end]           # (B,)
+        b_py = py[start:end]
+        b_colors = colors[start:end]   # (B, 3)
+        b_opacities = opacities[start:end]  # (B,)
+        b_inv_a = inv_a[start:end]
+        b_inv_b = inv_b[start:end]
+        b_inv_c = inv_c[start:end]
+        b_radius = radius[start:end]
 
-    image = image_flat.reshape(rH, rW, 3).clamp(0, 1).cpu().numpy()
-    return image
+        # Scale offsets by radius: each gaussian gets its own scaled kernel
+        # For gaussians with radius R, offsets span [-R, R] in R/(KERNEL_HALF) steps
+        scale = b_radius / KERNEL_HALF  # (B,)
+        # dx, dy for each gaussian at each kernel point: (B, K*K)
+        dx = dx_grid.unsqueeze(0) * scale.unsqueeze(1)  # (B, K*K)
+        dy = dy_grid.unsqueeze(0) * scale.unsqueeze(1)
+
+        # Evaluate 2D gaussian at each offset
+        power = -0.5 * (
+            b_inv_a.unsqueeze(1) * dx * dx +
+            2 * b_inv_b.unsqueeze(1) * dx * dy +
+            b_inv_c.unsqueeze(1) * dy * dy
+        )  # (B, K*K)
+
+        gauss_weight = torch.exp(power.clamp(min=-8.0))  # (B, K*K)
+        alpha = (b_opacities.unsqueeze(1) * gauss_weight).clamp(max=0.99)  # (B, K*K)
+
+        # Pixel coordinates for each splat point
+        splat_x = (b_px.unsqueeze(1) + dx).long()  # (B, K*K)
+        splat_y = (b_py.unsqueeze(1) + dy).long()
+
+        # Flatten for scatter
+        splat_x_flat = splat_x.reshape(-1)
+        splat_y_flat = splat_y.reshape(-1)
+        alpha_flat = alpha.reshape(-1)
+        # Expand colors to match: (B, K*K, 3)
+        colors_expanded = b_colors.unsqueeze(1).expand(-1, K_size, -1).reshape(-1, 3)
+
+        # Filter in-bounds
+        valid = (splat_x_flat >= 0) & (splat_x_flat < rW) & \
+                (splat_y_flat >= 0) & (splat_y_flat < rH) & \
+                (alpha_flat > 0.001)
+        splat_x_flat = splat_x_flat[valid]
+        splat_y_flat = splat_y_flat[valid]
+        alpha_flat = alpha_flat[valid]
+        colors_valid = colors_expanded[valid]  # (M, 3)
+
+        if splat_x_flat.shape[0] == 0:
+            continue
+
+        # Pixel indices
+        pixel_idx = splat_y_flat * rW + splat_x_flat  # (M,)
+
+        # Back-to-front compositing via simple alpha blend using scatter
+        # For each pixel: C_new = alpha * color + (1-alpha) * C_old
+        # With scatter, we approximate: accumulate weighted colors
+        weighted_colors = alpha_flat.unsqueeze(-1) * colors_valid  # (M, 3)
+
+        image_flat = image.reshape(-1, 3)
+        # Apply alpha blending: blend new color over existing
+        # Since we're going back-to-front, we use: C = alpha*color + (1-alpha)*C_existing
+        # With scatter_add this becomes an approximation but works well in practice
+        image_flat.scatter_add_(0, pixel_idx.unsqueeze(-1).expand(-1, 3), weighted_colors)
+
+        # Also accumulate alpha weights for normalization
+        weight_buf.scatter_add_(
+            0, pixel_idx.unsqueeze(-1), alpha_flat.unsqueeze(-1)
+        )
+
+    # Normalize by accumulated weight
+    weight = weight_buf.clamp(min=1e-6)
+    image_flat = image.reshape(-1, 3) / weight
+    result = image_flat.reshape(rH, rW, 3).clamp(0, 1).cpu().numpy()
+    return result
 
 
 # ─── LPIPS computation ─────────────────────────────────────────────────────
