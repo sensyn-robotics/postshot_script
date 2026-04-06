@@ -1,15 +1,13 @@
 {
   "pipeline": {
-    "overwrite_result": false,
-    "test_data_path": "C:\\postshot_test_data"
+    "overwrite_result": true,
+    "test_data_path": "C:\\postshot_script\\data\\tower"
   },
   "input": {
-    "scene_path": "",
-    "video_w": "video_W.mp4",
-    "video_z": "video_Z.mp4"
+    "scene_path": ""
   },
   "output": {
-    "dir_name": "output",
+    "dir_name": "output_v3",
     "images_subdir": "images",
     "colmap_subdir": "colmap",
     "postshot_subdir": "postshot",
@@ -17,9 +15,10 @@
   },
   "paths": {
     "ffmpeg": "C:\\ffmpeg\\bin\\ffmpeg.exe",
+    "ffprobe": "C:\\ffmpeg\\bin\\ffprobe.exe",
     "colmap": "C:\\COLMAP\\COLMAP.bat",
     "postshot_cli": "C:\\Program Files\\Jawset Postshot\\bin\\postshot-cli.exe",
-    "python": "C:\\Users\\共通パソコンsfmPC⑦\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+    "python": "python",
     "temp": "C:\\Postshot_Temp"
   },
   "stage_01_extract": {

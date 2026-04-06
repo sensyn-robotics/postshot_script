@@ -1,0 +1,21 @@
+Stage,Setting,Default,V3
+Stage 1 - Extract,fps,0.5,2
+Stage 1 - Extract,target_frames,(not set),0
+Stage 2 - Filter,enabled,true,false
+Stage 3 - Features,single_camera,(not set),true
+Stage 3 - Features,single_camera_per_folder,true,false
+Stage 3 - Features,max_features,8192,16384
+Stage 4 - Matching,type,exhaustive,sequential
+Stage 4 - Matching,sequential_overlap,(not set),20
+Stage 4 - Matching,sequential_loop,(not set),true
+Stage 4 - Matching,guided_matching,(not set),true
+Stage 4 - Matching,sift_max_ratio,(not set),0.8
+Stage 5 - Mapper,quality_gate,(not set),false
+Stage 5 - Mapper,merge_models,(not set),false
+Stage 5 - Mapper,min_model_size,50,10
+Stage 5 - Mapper,ba_global_max_iterations,50,100
+Stage 5 - Mapper,ba_local_max_iterations,15,25
+Stage 6 - Train,checkpoints,"[5000, 10000, 30000]","[10000, 30000]"
+Stage 6 - Train,save_visualization,true,false
+Stage 6 - Train,train_camera,Z,all
+Stage 6 - Train,train_steps_limit,50,0 (unlimited)

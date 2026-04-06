@@ -601,6 +601,23 @@ def main():
     if skipped > 0:
         print(f"  Skipped {skipped} images (not found or render failed)")
 
+    # Compute PSNR
+    psnr_scores = []
+    for render, original in zip(renders, originals):
+        # Resize render to match original for fair PSNR comparison
+        from PIL import Image as PILImage
+        r_pil = PILImage.fromarray((render * 255).clip(0, 255).astype(np.uint8))
+        r_resized = r_pil.resize((original.shape[1], original.shape[0]), PILImage.LANCZOS)
+        r_np = np.array(r_resized).astype(np.float32) / 255.0
+        mse = np.mean((r_np - original) ** 2)
+        if mse < 1e-10:
+            psnr_scores.append(100.0)
+        else:
+            psnr_scores.append(float(-10.0 * np.log10(mse)))
+
+    psnr_mean = float(np.mean(psnr_scores))
+    print(f"  PSNR mean:  {psnr_mean:.2f} dB")
+
     # Compute LPIPS
     print(f"Computing LPIPS on {len(renders)} image pairs...")
     lpips_scores = compute_lpips_batch(renders, originals, device=device)
@@ -613,9 +630,10 @@ def main():
     # Write output
     result = {
         "lpips_mean": round(lpips_mean, 6),
+        "psnr_mean": round(psnr_mean, 4),
         "lpips_per_image": [
-            {"name": name, "lpips": round(score, 6)}
-            for name, score in zip(eval_names, lpips_scores)
+            {"name": name, "lpips": round(lscore, 6), "psnr": round(pscore, 4)}
+            for name, lscore, pscore in zip(eval_names, lpips_scores, psnr_scores)
         ],
         "num_images": len(renders),
         "num_skipped": skipped,
