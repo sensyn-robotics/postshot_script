@@ -158,43 +158,7 @@ if (Test-Path -LiteralPath $sparseDir) {
     }
 }
 
-# === Filter degenerate two-view geometries (PLANAR/PANORAMIC/PLANAR_OR_PANORAMIC) ===
-$filterDegenerate = $true
-if ($config.stage_05_mapper.PSObject.Properties['filter_degenerate_pairs']) {
-    $filterDegenerate = $config.stage_05_mapper.filter_degenerate_pairs
-}
-
-if ($filterDegenerate) {
-    $pythonExe = $config.paths.python
-    Write-Host ""
-    Write-Host "  Filtering degenerate two-view geometries..." -ForegroundColor Cyan
-
-    $filterResult = & $pythonExe -c @"
-import sqlite3, sys
-db = sqlite3.connect(r'$($databasePath.Replace("'","''"))')
-# Count before
-total = db.execute('SELECT COUNT(*) FROM two_view_geometries WHERE rows > 0').fetchone()[0]
-# Config types: 4=PLANAR, 5=PANORAMIC, 6=PLANAR_OR_PANORAMIC
-degenerate = db.execute('SELECT COUNT(*) FROM two_view_geometries WHERE config IN (4, 5, 6)').fetchone()[0]
-if degenerate > 0:
-    db.execute('DELETE FROM two_view_geometries WHERE config IN (4, 5, 6)')
-    db.commit()
-db.close()
-print(f'{degenerate}/{total}')
-"@ 2>&1
-
-    if ($filterResult -match '(\d+)/(\d+)') {
-        $removed = [int]$Matches[1]
-        $total = [int]$Matches[2]
-        if ($removed -gt 0) {
-            Write-Host "  Removed $removed/$total degenerate pairs (PLANAR/PANORAMIC)" -ForegroundColor Yellow
-        } else {
-            Write-Host "  No degenerate pairs found ($total verified pairs)" -ForegroundColor Green
-        }
-    } else {
-        Write-Host "  WARNING: Filter script output unexpected: $filterResult" -ForegroundColor Yellow
-    }
-}
+# (Pre-mapper filtering removed — post-mapper outlier removal used instead)
 
 # Create sparse output directory
 if (-not (Test-Path -LiteralPath $sparseDir)) {
@@ -409,6 +373,138 @@ if (-not $largestRecon) {
 }
 
 Write-Host "  Selected reconstruction: $($largestRecon.Name)" -ForegroundColor Green
+
+# === Remove outlier cameras (degenerate pose estimation) ===
+$filterDegenerate = $true
+if ($config.stage_05_mapper.PSObject.Properties['filter_degenerate_pairs']) {
+    $filterDegenerate = $config.stage_05_mapper.filter_degenerate_pairs
+}
+
+if ($filterDegenerate) {
+    $pythonExe = $config.paths.python
+    Write-Host ""
+    Write-Host "  Removing outlier cameras..." -ForegroundColor Cyan
+
+    $filterResult = & $pythonExe -c @"
+import struct, numpy as np, os, shutil
+
+def read_images_bin(path):
+    images = []
+    raw_data = []
+    with open(path, 'rb') as f:
+        num = struct.unpack('<Q', f.read(8))[0]
+        for _ in range(num):
+            start = f.tell()
+            img_id = struct.unpack('<I', f.read(4))[0]
+            qw, qx, qy, qz = struct.unpack('<4d', f.read(32))
+            tx, ty, tz = struct.unpack('<3d', f.read(24))
+            cam_id = struct.unpack('<I', f.read(4))[0]
+            name = b''
+            while True:
+                c = f.read(1)
+                if c == b'\x00': break
+                name += c
+            num_pts = struct.unpack('<Q', f.read(8))[0]
+            for _ in range(num_pts):
+                f.read(24)
+            end = f.tell()
+            R = np.array([
+                [1-2*(qy**2+qz**2), 2*(qx*qy-qz*qw), 2*(qx*qz+qy*qw)],
+                [2*(qx*qy+qz*qw), 1-2*(qx**2+qz**2), 2*(qy*qz-qx*qw)],
+                [2*(qx*qz-qy*qw), 2*(qy*qz+qx*qw), 1-2*(qx**2+qy**2)]
+            ])
+            pos = -R.T @ np.array([tx, ty, tz])
+            images.append({'id': img_id, 'name': name.decode(), 'pos': pos, 'start': start, 'end': end})
+    return images
+
+recon_path = r'$($largestRecon.FullName.Replace("'","''"))'
+images_bin = os.path.join(recon_path, 'images.bin')
+images = read_images_bin(images_bin)
+
+if len(images) < 10:
+    print('0/' + str(len(images)))
+    exit(0)
+
+positions = np.array([img['pos'] for img in images])
+median_pos = np.median(positions, axis=0)
+dists = np.linalg.norm(positions - median_pos, axis=1)
+
+q1, q3 = np.percentile(dists, [25, 75])
+iqr = q3 - q1
+threshold = q3 + 3 * iqr
+
+outlier_ids = set()
+for i, img in enumerate(images):
+    if dists[i] > threshold:
+        outlier_ids.add(img['id'])
+
+if not outlier_ids:
+    print('0/' + str(len(images)))
+    exit(0)
+
+# Rewrite images.bin without outliers
+with open(images_bin, 'rb') as f:
+    raw = f.read()
+
+# Backup
+shutil.copy2(images_bin, images_bin + '.bak')
+
+with open(images_bin, 'wb') as f:
+    f.write(struct.pack('<Q', len(images) - len(outlier_ids)))
+    for img in images:
+        if img['id'] not in outlier_ids:
+            f.write(raw[img['start']:img['end']])
+
+print(f'{len(outlier_ids)}/{len(images)}')
+"@ 2>&1
+
+    if ($filterResult -match '(\d+)/(\d+)') {
+        $removed = [int]$Matches[1]
+        $total = [int]$Matches[2]
+        if ($removed -gt 0) {
+            Write-Host "  Removed $removed/$total outlier cameras" -ForegroundColor Yellow
+
+            # Re-run bundle adjustment to refine after removing outliers
+            Write-Host "  Re-running bundle adjustment..." -ForegroundColor Cyan
+            $baArgs = @(
+                "bundle_adjuster",
+                "--input_path", $largestRecon.FullName,
+                "--output_path", $largestRecon.FullName
+            )
+            $baProcess = Start-Process -FilePath $colmapBin -ArgumentList $baArgs -NoNewWindow -Wait -PassThru
+            if ($baProcess.ExitCode -eq 0) {
+                Write-Host "  Bundle adjustment completed" -ForegroundColor Green
+            } else {
+                Write-Host "  WARNING: Bundle adjustment failed (continuing with filtered model)" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "  No outlier cameras found ($total cameras)" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  WARNING: Outlier filter output unexpected: $filterResult" -ForegroundColor Yellow
+    }
+}
+
+# === Registration check: at least 50% of images must be registered ===
+$pythonExe = $config.paths.python
+$totalImageCount = (Get-ChildItem -LiteralPath $imagesDir -Recurse -File |
+    Where-Object { $_.Extension -in @('.png','.jpg','.jpeg','.PNG','.JPG','.JPEG') }).Count
+
+$regResult = & $pythonExe -c @"
+import struct
+with open(r'$($largestRecon.FullName.Replace("'","''"))\images.bin', 'rb') as f:
+    n = struct.unpack('<Q', f.read(8))[0]
+print(n)
+"@ 2>&1
+
+$registeredCount = [int]$regResult
+$regPct = [math]::Round(100 * $registeredCount / $totalImageCount, 1)
+Write-Host "  Registration: $registeredCount / $totalImageCount ($regPct%)" -ForegroundColor $(if ($regPct -ge 50) { "Green" } else { "Red" })
+
+if ($regPct -lt 50) {
+    Write-Host "ERROR: Only $regPct% images registered (need >= 50%)" -ForegroundColor Red
+    exit 1
+}
 
 # === COLMAP Quality Gate Check ===
 if ($colmapQualityGate) {

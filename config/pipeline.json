@@ -1,7 +1,7 @@
 {
   "pipeline": {
-    "overwrite_result": false,
-    "test_data_path": "C:\\postshot_test_data"
+    "overwrite_result": true,
+    "test_data_path": "C:\\postshot_script\\data\\tower"
   },
   "input": {
     "scene_path": "",
