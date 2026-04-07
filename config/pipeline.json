@@ -19,7 +19,7 @@
     "ffmpeg": "C:\\ffmpeg\\bin\\ffmpeg.exe",
     "colmap": "C:\\COLMAP\\COLMAP.bat",
     "postshot_cli": "C:\\Program Files\\Jawset Postshot\\bin\\postshot-cli.exe",
-    "python": "C:\\Users\\共通パソコンsfmPC⑦\\AppData\\Local\\Programs\\Python\\Python311\\python.exe",
+    "python": "python",
     "temp": "C:\\Postshot_Temp"
   },
   "stage_01_extract": {
