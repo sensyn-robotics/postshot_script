@@ -158,6 +158,44 @@ if (Test-Path -LiteralPath $sparseDir) {
     }
 }
 
+# === Filter degenerate two-view geometries (PLANAR/PANORAMIC/PLANAR_OR_PANORAMIC) ===
+$filterDegenerate = $true
+if ($config.stage_05_mapper.PSObject.Properties['filter_degenerate_pairs']) {
+    $filterDegenerate = $config.stage_05_mapper.filter_degenerate_pairs
+}
+
+if ($filterDegenerate) {
+    $pythonExe = $config.paths.python
+    Write-Host ""
+    Write-Host "  Filtering degenerate two-view geometries..." -ForegroundColor Cyan
+
+    $filterResult = & $pythonExe -c @"
+import sqlite3, sys
+db = sqlite3.connect(r'$($databasePath.Replace("'","''"))')
+# Count before
+total = db.execute('SELECT COUNT(*) FROM two_view_geometries WHERE rows > 0').fetchone()[0]
+# Config types: 4=PLANAR, 5=PANORAMIC, 6=PLANAR_OR_PANORAMIC
+degenerate = db.execute('SELECT COUNT(*) FROM two_view_geometries WHERE config IN (4, 5, 6)').fetchone()[0]
+if degenerate > 0:
+    db.execute('DELETE FROM two_view_geometries WHERE config IN (4, 5, 6)')
+    db.commit()
+db.close()
+print(f'{degenerate}/{total}')
+"@ 2>&1
+
+    if ($filterResult -match '(\d+)/(\d+)') {
+        $removed = [int]$Matches[1]
+        $total = [int]$Matches[2]
+        if ($removed -gt 0) {
+            Write-Host "  Removed $removed/$total degenerate pairs (PLANAR/PANORAMIC)" -ForegroundColor Yellow
+        } else {
+            Write-Host "  No degenerate pairs found ($total verified pairs)" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  WARNING: Filter script output unexpected: $filterResult" -ForegroundColor Yellow
+    }
+}
+
 # Create sparse output directory
 if (-not (Test-Path -LiteralPath $sparseDir)) {
     New-Item -ItemType Directory -Path $sparseDir -Force | Out-Null

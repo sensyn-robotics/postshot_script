@@ -48,6 +48,7 @@
     "multiple_models": true,
     "merge_models": false,
     "quality_gate": false,
+    "filter_degenerate_pairs": true,
     "min_model_size": 10,
     "ba_global_max_iterations": 100,
     "ba_local_max_iterations": 25,
