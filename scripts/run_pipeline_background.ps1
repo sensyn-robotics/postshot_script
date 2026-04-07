@@ -33,17 +33,17 @@ $innerArgs = @(
 `$ErrorActionPreference = 'Stop'
 Set-Location '$projectRoot'
 
-# Prevent sleep: set power scheme to never sleep
+# Prevent sleep but allow screen lock
 powercfg /change standby-timeout-ac 0
 powercfg /change standby-timeout-dc 0
-powercfg /change monitor-timeout-ac 0
-powercfg /change monitor-timeout-dc 0
+powercfg /change monitor-timeout-ac 1
+powercfg /change monitor-timeout-dc 1
 # Lid close = do nothing
 powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /SETACTIVE SCHEME_CURRENT
 
-Write-Host 'Sleep disabled for training' -ForegroundColor Yellow
+Write-Host 'Sleep disabled, screen locks after 1 min' -ForegroundColor Yellow
 Write-Host "Log file: $logFile" -ForegroundColor Cyan
 
 try {

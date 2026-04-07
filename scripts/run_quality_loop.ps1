@@ -24,15 +24,15 @@ $projectRoot = Split-Path -Parent $scriptRoot
 
 Set-Location $projectRoot
 
-# Prevent sleep
+# Prevent sleep but allow screen lock
 powercfg /change standby-timeout-ac 0
 powercfg /change standby-timeout-dc 0
-powercfg /change monitor-timeout-ac 0
-powercfg /change monitor-timeout-dc 0
+powercfg /change monitor-timeout-ac 1
+powercfg /change monitor-timeout-dc 1
 powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /SETACTIVE SCHEME_CURRENT
-Write-Host "Sleep disabled for training" -ForegroundColor Yellow
+Write-Host "Sleep disabled, screen locks after 1 min" -ForegroundColor Yellow
 
 $targetSSIM = 0.8
 $targetLPIPS = 0.5
