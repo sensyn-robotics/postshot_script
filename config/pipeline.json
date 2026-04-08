@@ -24,7 +24,7 @@
   },
   "stage_01_extract": {
     "fps": 2,
-    "target_frames": 0,
+    "target_frames": 600,
     "format": "png",
     "quality": 2
   },
@@ -38,7 +38,7 @@
   },
   "stage_04_matching": {
     "type": "sequential",
-    "overlap": 20,
+    "overlap": 40,
     "loop_detection": true,
     "guided_matching": true,
     "sift_max_ratio": 0.8
