@@ -207,13 +207,29 @@ Write-Host "  Command: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGra
 $vizLog = Join-Path $vizDir "mapper_progress.log"
 Add-Content -Path $vizLog -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Starting COLMAP mapper"
 
+$timeoutHours = 12
+if ($config.stage_05_mapper.PSObject.Properties['colmap_timeout_hours']) {
+    $timeoutHours = $config.stage_05_mapper.colmap_timeout_hours
+}
+$timeoutMs = [int]($timeoutHours * 3600 * 1000)
+
+Write-Host "  Timeout: $timeoutHours hours" -ForegroundColor DarkGray
+
 $startTime = Get-Date
 
 $process = Start-Process -FilePath $colmapBin `
     -ArgumentList $colmapArgs `
-    -NoNewWindow -Wait -PassThru
+    -NoNewWindow -PassThru
 
+$exited = $process.WaitForExit($timeoutMs)
 $duration = (Get-Date) - $startTime
+
+if (-not $exited) {
+    Write-Host "ERROR: Mapper timed out after $timeoutHours hours. Killing process." -ForegroundColor Red
+    Add-Content -Path $vizLog -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Mapper TIMED OUT after $timeoutHours hours"
+    $process.Kill()
+    exit 1
+}
 
 Add-Content -Path $vizLog -Value "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - Mapper completed with exit code $($process.ExitCode)"
 

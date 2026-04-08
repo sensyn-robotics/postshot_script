@@ -193,13 +193,26 @@ Write-Host ""
 Write-Host "  Running $matcherType matching..." -ForegroundColor Cyan
 Write-Host "  Command: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
 
+$timeoutHours = 12
+if ($config.stage_05_mapper -and $config.stage_05_mapper.PSObject.Properties['colmap_timeout_hours']) {
+    $timeoutHours = $config.stage_05_mapper.colmap_timeout_hours
+}
+$timeoutMs = [int]($timeoutHours * 3600 * 1000)
+
 $startTime = Get-Date
 
 $process = Start-Process -FilePath $colmapBin `
     -ArgumentList $colmapArgs `
-    -NoNewWindow -Wait -PassThru
+    -NoNewWindow -PassThru
 
+$exited = $process.WaitForExit($timeoutMs)
 $duration = (Get-Date) - $startTime
+
+if (-not $exited) {
+    Write-Host "ERROR: Feature matching timed out after $timeoutHours hours. Killing process." -ForegroundColor Red
+    $process.Kill()
+    exit 1
+}
 
 if ($process.ExitCode -ne 0) {
     Write-Host "ERROR: Feature matching failed with exit code $($process.ExitCode)" -ForegroundColor Red

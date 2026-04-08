@@ -48,6 +48,7 @@
     "merge_models": false,
     "quality_gate": false,
     "filter_degenerate_pairs": true,
+    "colmap_timeout_hours": 12,
     "min_model_size": 50,
     "ba_global_max_iterations": 50,
     "ba_local_max_iterations": 15,
