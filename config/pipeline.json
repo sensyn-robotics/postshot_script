@@ -38,8 +38,8 @@
   },
   "stage_04_matching": {
     "type": "sequential",
-    "sequential_overlap": 20,
-    "sequential_loop": true,
+    "overlap": 20,
+    "loop_detection": true,
     "guided_matching": true,
     "sift_max_ratio": 0.8
   },
