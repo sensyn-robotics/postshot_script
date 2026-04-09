@@ -24,7 +24,7 @@
               },
     "stage_01_extract":  {
                              "fps":  2,
-                             "target_frames":  600,
+                             "target_frames":  0,
                              "format":  "png",
                              "quality":  2
                          },
@@ -34,7 +34,7 @@
     "stage_03_features":  {
                               "camera_model":  "SIMPLE_RADIAL",
                               "single_camera_per_folder":  true,
-                              "max_features":  8192
+                              "max_features":  16384
                           },
     "stage_04_matching":  {
                               "type":  "sequential"
@@ -42,8 +42,8 @@
     "stage_05_mapper":  {
                             "multiple_models":  true,
                             "filter_degenerate_pairs":  true,
-                            "colmap_timeout_hours":  12,
-                            "min_model_size":  50,
+                            "colmap_timeout_hours":  3,
+                            "min_model_size":  10,
                             "visualization_interval_minutes":  10
                         },
     "stage_06_train":  {
