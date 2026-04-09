@@ -145,23 +145,30 @@ run_lpips_all.ps1                      # Standalone: batch LPIPS metrics
 | `run_pipeline_allscene.ps1` | Run pipeline on one or all scenes | `.\scripts\run_pipeline_allscene.ps1 -ConfigPath config\pipeline.json` |
 | `run_pipeline_single.ps1` | Single scene with quality gates and auto-retry | `.\scripts\run_pipeline_single.ps1 -ConfigPath config\pipeline_single.json` |
 
-### Standalone Python Utilities
+### Python Scripts (called by stages)
+
+| Script | Called by | Purpose |
+|--------|----------|---------|
+| `blur_detector.py` | Stage 02 | Detect blurred frames (Laplacian variance) |
+| `optical_flow_analyzer.py` | Stage 02 | Compute optical flow, select keyframes |
+| `frame_selector.py` | Stage 02 | Combined blur removal + keyframe selection |
+| `check_sparse_quality.py` | Stage 05 | Evaluate COLMAP reconstruction quality |
+| `compute_lpips.py` | Stage 06 | Compute LPIPS, PSNR metrics from PLY renders |
+| `render_checkpoint.py` | Stage 06 | Render PLY to multi-view images |
+| `cubemap_decompose.py` | Stage 01b | Convert equirectangular to cubemap faces |
+
+### Standalone Utilities (`scripts/util/`)
 
 | Script | Purpose |
 |--------|---------|
-| `blur_detector.py` | Detect blurred frames (Laplacian variance) |
-| `optical_flow_analyzer.py` | Compute optical flow, select keyframes by overlap |
-| `frame_selector.py` | Combined blur removal + keyframe selection |
-| `compute_lpips.py` | Compute LPIPS, PSNR metrics from PLY renders |
-| `check_sparse_quality.py` | Evaluate COLMAP reconstruction quality |
-| `check_colmap_quality.py` | Check COLMAP reconstruction viability |
-| `render_checkpoint.py` | Render PLY to multi-view images |
-| `render_pointcloud.py` | Render COLMAP sparse point cloud |
-| `read_colmap_model.py` | Parse and report COLMAP binary model stats |
-| `cubemap_decompose.py` | Convert equirectangular to cubemap faces |
-| `resize_images.py` | Resize images for resolution testing |
+| `run_lpips_all.ps1` | Batch LPIPS metrics across scenes |
+| `create_test_dataset.ps1` | Create small test dataset |
 | `analyze_matches.py` | Analyze feature match distribution |
 | `analyze_overlap.py` | Analyze frame-to-frame overlap |
+| `check_colmap_quality.py` | Check COLMAP reconstruction viability |
+| `read_colmap_model.py` | Parse and report COLMAP binary model stats |
+| `render_pointcloud.py` | Render COLMAP sparse point cloud |
+| `resize_images.py` | Resize images for resolution testing |
 
 ## Output Structure
 
@@ -212,9 +219,16 @@ postshot_script/
 │   ├── run_param_search.ps1       # Parameter search (entry point)
 │   ├── run_pipeline_allscene.ps1  # Pipeline orchestrator
 │   ├── run_pipeline_single.ps1    # Single scene with quality gates
-│   ├── run_lpips_all.ps1          # Batch LPIPS metrics
-│   ├── create_test_dataset.ps1    # Create small test dataset
-│   ├── [Python utilities]         # Analysis and processing scripts
+│   ├── [Python scripts]           # Called by stage scripts
+│   ├── util/                      # Standalone utilities
+│   │   ├── run_lpips_all.ps1      # Batch LPIPS metrics
+│   │   ├── create_test_dataset.ps1
+│   │   ├── analyze_matches.py
+│   │   ├── analyze_overlap.py
+│   │   ├── read_colmap_model.py
+│   │   ├── render_pointcloud.py
+│   │   ├── resize_images.py
+│   │   └── check_colmap_quality.py
 │   └── debug/                     # Diagnostic scripts
 ├── tests/
 │   └── run_tests.ps1

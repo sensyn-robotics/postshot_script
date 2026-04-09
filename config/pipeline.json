@@ -34,7 +34,7 @@
     "stage_03_features":  {
                               "camera_model":  "SIMPLE_RADIAL",
                               "single_camera_per_folder":  true,
-                              "max_features":  16384
+                              "max_features":  8192
                           },
     "stage_04_matching":  {
                               "type":  "sequential"
@@ -43,7 +43,7 @@
                             "multiple_models":  true,
                             "filter_degenerate_pairs":  true,
                             "colmap_timeout_hours":  12,
-                            "min_model_size":  10,
+                            "min_model_size":  30,
                             "visualization_interval_minutes":  10
                         },
     "stage_06_train":  {
