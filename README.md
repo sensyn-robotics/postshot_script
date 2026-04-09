@@ -219,16 +219,8 @@ postshot_script/
 │   ├── run_param_search.ps1       # Parameter search (entry point)
 │   ├── run_pipeline_allscene.ps1  # Pipeline orchestrator
 │   ├── run_pipeline_single.ps1    # Single scene with quality gates
-│   ├── [Python scripts]           # Called by stage scripts
-│   ├── util/                      # Standalone utilities
-│   │   ├── run_lpips_all.ps1      # Batch LPIPS metrics
-│   │   ├── create_test_dataset.ps1
-│   │   ├── analyze_matches.py
-│   │   ├── analyze_overlap.py
-│   │   ├── read_colmap_model.py
-│   │   ├── render_pointcloud.py
-│   │   ├── resize_images.py
-│   │   └── check_colmap_quality.py
+│   ├── util/                      # All Python utilities + standalone scripts
+│   │   (all Python scripts + standalone PS1 utilities)
 │   └── debug/                     # Diagnostic scripts
 ├── tests/
 │   └── run_tests.ps1

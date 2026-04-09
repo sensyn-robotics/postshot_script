@@ -101,7 +101,7 @@ if ($singleVideoMode) {
 Write-Host ""
 Write-Host "--- Step 2a: Blur Detection ---" -ForegroundColor Yellow
 
-$blurScript = Join-Path $scriptDir "blur_detector.py"
+$blurScript = Join-Path $scriptDir "util/blur_detector.py"
 if (-not (Test-Path -LiteralPath $blurScript)) {
     Write-Host "ERROR: blur_detector.py not found at: $blurScript" -ForegroundColor Red
     exit 1
@@ -132,7 +132,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "--- Step 2b: Keyframe Selection ---" -ForegroundColor Yellow
 
-$flowScript = Join-Path $scriptDir "optical_flow_analyzer.py"
+$flowScript = Join-Path $scriptDir "util\optical_flow_analyzer.py"
 if (-not (Test-Path -LiteralPath $flowScript)) {
     Write-Host "WARNING: optical_flow_analyzer.py not found, skipping keyframe selection" -ForegroundColor Yellow
 } else {

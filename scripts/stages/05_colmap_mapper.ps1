@@ -638,7 +638,7 @@ if ($regPct -lt 50) {
 
 # === COLMAP Quality Gate Check ===
 if ($colmapQualityGate) {
-    $qualityScript = Join-Path (Split-Path $PSScriptRoot) "check_sparse_quality.py"
+    $qualityScript = Join-Path (Split-Path $PSScriptRoot) "util\check_sparse_quality.py"
     $colmapQualityJson = Join-Path $colmapDir "sparse_quality.json"
 
     # Count total images from images directory

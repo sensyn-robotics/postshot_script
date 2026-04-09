@@ -20,8 +20,8 @@ Set-Location C:\postshot_script
 # Prevent sleep, allow screen lock
 powercfg /change standby-timeout-ac 0
 powercfg /change standby-timeout-dc 0
-powercfg /change monitor-timeout-ac 1
-powercfg /change monitor-timeout-dc 1
+powercfg /change monitor-timeout-ac 10
+powercfg /change monitor-timeout-dc 10
 powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /SETACTIVE SCHEME_CURRENT
@@ -205,6 +205,6 @@ if ($winningTrial) {
 # Restore sleep
 powercfg /change standby-timeout-ac 30
 powercfg /change standby-timeout-dc 15
-powercfg /change monitor-timeout-ac 10
+powercfg /change monitor-timeout-ac 100
 powercfg /change monitor-timeout-dc 5
 Write-Host "Sleep settings restored" -ForegroundColor Yellow

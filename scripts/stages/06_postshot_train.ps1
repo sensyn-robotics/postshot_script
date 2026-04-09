@@ -425,7 +425,7 @@ try {
             Write-Host ""
             Write-Host "  Generating visualizations..." -ForegroundColor Cyan
 
-            $renderScript = Join-Path $scriptDir "render_checkpoint.py"
+            $renderScript = Join-Path $scriptDir "util/render_checkpoint.py"
 
             if (Test-Path -LiteralPath $renderScript) {
                 # Get final checkpoint number from config (or default to 30000)
@@ -456,7 +456,7 @@ try {
 
     # Compute LPIPS if PLY exists and compute_lpips.py is available
     $lpipsMean = $null
-    $lpipsScript = Join-Path $scriptDir "compute_lpips.py"
+    $lpipsScript = Join-Path $scriptDir "util\compute_lpips.py"
     if ((Test-Path -LiteralPath $lpipsScript) -and (Test-Path -LiteralPath $plyPath)) {
         Write-Host ""
         Write-Host "  Computing LPIPS (perceptual quality)..." -ForegroundColor Cyan

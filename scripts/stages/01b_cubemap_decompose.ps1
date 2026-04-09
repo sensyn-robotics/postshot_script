@@ -155,7 +155,7 @@ if (-not (Test-Path -LiteralPath $ffmpegExe)) {
 }
 
 # Locate cubemap_decompose.py
-$cubemapScript = Join-Path $scriptDir "cubemap_decompose.py"
+$cubemapScript = Join-Path $scriptDir "util\cubemap_decompose.py"
 if (-not (Test-Path -LiteralPath $cubemapScript)) {
     Write-Host "ERROR: cubemap_decompose.py not found at: $cubemapScript" -ForegroundColor Red
     exit 1
