@@ -158,7 +158,111 @@ if (Test-Path -LiteralPath $sparseDir) {
     }
 }
 
-# (Pre-mapper filtering removed — post-mapper outlier removal used instead)
+# === Filter pure-rotation frames: create image list excluding continuous rotation segments ===
+$filterDegenerate = $true
+if ($config.stage_05_mapper.PSObject.Properties['filter_degenerate_pairs']) {
+    $filterDegenerate = $config.stage_05_mapper.filter_degenerate_pairs
+}
+
+$imageListPath = $null
+if ($filterDegenerate) {
+    $pythonExe = $config.paths.python
+    $imageListFile = Join-Path $colmapDir "image_list.txt"
+
+    Write-Host ""
+    Write-Host "  Filtering pure-rotation frames..." -ForegroundColor Cyan
+
+    $filterResult = & $pythonExe -c @"
+import sqlite3, os
+from collections import defaultdict
+
+db = sqlite3.connect(r'$($databasePath.Replace("'","''"))')
+
+imgs = db.execute('SELECT image_id, name FROM images ORDER BY name').fetchall()
+id_to_name = {img_id: name for img_id, name in imgs}
+
+# Parse frame numbers
+def frame_num(name):
+    try:
+        return int(name.rsplit('_', 1)[-1].split('.')[0])
+    except:
+        return -1
+
+id_to_frame = {img_id: frame_num(name) for img_id, name in imgs}
+frame_to_name = {frame_num(name): name for _, name in imgs}
+
+def pair_id_to_ids(pair_id):
+    id2 = pair_id % 2147483647
+    id1 = (pair_id - id2) // 2147483647
+    return int(id1), int(id2)
+
+tvg = db.execute('SELECT pair_id, rows, config FROM two_view_geometries WHERE rows > 0').fetchall()
+
+# For each frame, check if it has any non-degenerate (type 2 or 3) pair
+# with a close neighbor (within 5 frames)
+has_close_good = set()
+for pair_id, rows, config in tvg:
+    if config in (4, 5, 6):
+        continue
+    id1, id2 = pair_id_to_ids(pair_id)
+    f1 = id_to_frame.get(id1, -1)
+    f2 = id_to_frame.get(id2, -1)
+    if f1 < 0 or f2 < 0:
+        continue
+    if abs(f1 - f2) <= 5:
+        has_close_good.add(f1)
+        has_close_good.add(f2)
+
+all_frames = sorted(frame_to_name.keys())
+
+# Find continuous segments of frames WITHOUT close good pairs
+bad_frames = sorted(set(all_frames) - has_close_good)
+
+# Group into continuous segments
+segments = []
+if bad_frames:
+    start = bad_frames[0]
+    prev = start
+    for f in bad_frames[1:]:
+        if f == prev + 1:
+            prev = f
+        else:
+            segments.append((start, prev))
+            start = f
+            prev = f
+    segments.append((start, prev))
+
+# Exclude frames in continuous pure-rotation segments (length >= 3)
+exclude = set()
+for s, e in segments:
+    if e - s + 1 >= 3:
+        exclude.update(range(s, e + 1))
+
+# Write image list (include all except excluded)
+keep_names = [frame_to_name[f] for f in all_frames if f not in exclude]
+
+with open(r'$($imageListFile.Replace("'","''"))', 'w') as fout:
+    for name in keep_names:
+        fout.write(name + '\n')
+
+db.close()
+print(f'{len(exclude)}/{len(all_frames)}/{len(keep_names)}')
+"@ 2>&1
+
+    if ($filterResult -match '(\d+)/(\d+)/(\d+)') {
+        $excluded = [int]$Matches[1]
+        $total = [int]$Matches[2]
+        $kept = [int]$Matches[3]
+        if ($excluded -gt 0) {
+            Write-Host "  Excluded $excluded/$total pure-rotation frames ($kept kept)" -ForegroundColor Yellow
+            $imageListPath = $imageListFile
+        } else {
+            Write-Host "  No pure-rotation segments found ($total frames)" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  WARNING: Filter output unexpected: $filterResult" -ForegroundColor Yellow
+    }
+}
 
 # Create sparse output directory
 if (-not (Test-Path -LiteralPath $sparseDir)) {
@@ -170,17 +274,9 @@ if (-not (Test-Path -LiteralPath $vizDir)) {
     New-Item -ItemType Directory -Path $vizDir -Force | Out-Null
 }
 
-# Resolve effective mapper parameters (override > config)
+# Resolve effective min_model_size (override > config > COLMAP default 10)
 $effectiveMinModelSize = if ($MinModelSizeOverride -gt 0) { $MinModelSizeOverride } else { $config.stage_05_mapper.min_model_size }
-$effectiveInitMinNumInliers = if ($InitMinNumInliersOverride -gt 0) { $InitMinNumInliersOverride } else { $config.stage_05_mapper.init_min_num_inliers }
-$effectiveAbsPoseMinNumInliers = if ($AbsPoseMinNumInliersOverride -gt 0) { $AbsPoseMinNumInliersOverride } else { $config.stage_05_mapper.abs_pose_min_num_inliers }
-$effectiveAbsPoseMinInlierRatio = if ($AbsPoseMinInlierRatioOverride -gt 0) { $AbsPoseMinInlierRatioOverride } else { $config.stage_05_mapper.abs_pose_min_inlier_ratio }
-
-# Log overrides
 if ($MinModelSizeOverride -gt 0) { Write-Host "  min_model_size: $effectiveMinModelSize (override)" -ForegroundColor Yellow }
-if ($InitMinNumInliersOverride -gt 0) { Write-Host "  init_min_num_inliers: $effectiveInitMinNumInliers (override)" -ForegroundColor Yellow }
-if ($AbsPoseMinNumInliersOverride -gt 0) { Write-Host "  abs_pose_min_num_inliers: $effectiveAbsPoseMinNumInliers (override)" -ForegroundColor Yellow }
-if ($AbsPoseMinInlierRatioOverride -gt 0) { Write-Host "  abs_pose_min_inlier_ratio: $effectiveAbsPoseMinInlierRatio (override)" -ForegroundColor Yellow }
 
 # Build mapper arguments
 $multipleModels = if ($config.stage_05_mapper.multiple_models) { 1 } else { 0 }
@@ -191,13 +287,31 @@ $colmapArgs = @(
     "--image_path", $imagesDir,
     "--output_path", $sparseDir,
     "--Mapper.multiple_models=$multipleModels",
-    "--Mapper.min_model_size=$effectiveMinModelSize",
-    "--Mapper.ba_global_max_num_iterations=$($config.stage_05_mapper.ba_global_max_iterations)",
-    "--Mapper.ba_local_max_num_iterations=$($config.stage_05_mapper.ba_local_max_iterations)",
-    "--Mapper.init_min_num_inliers=$effectiveInitMinNumInliers",
-    "--Mapper.abs_pose_min_num_inliers=$effectiveAbsPoseMinNumInliers",
-    "--Mapper.abs_pose_min_inlier_ratio=$effectiveAbsPoseMinInlierRatio"
+    "--Mapper.min_model_size=$effectiveMinModelSize"
 )
+
+# Add optional parameters only if explicitly set in config
+if ($config.stage_05_mapper.PSObject.Properties['ba_global_max_iterations']) {
+    $colmapArgs += @("--Mapper.ba_global_max_num_iterations=$($config.stage_05_mapper.ba_global_max_iterations)")
+}
+if ($config.stage_05_mapper.PSObject.Properties['ba_local_max_iterations']) {
+    $colmapArgs += @("--Mapper.ba_local_max_num_iterations=$($config.stage_05_mapper.ba_local_max_iterations)")
+}
+if ($config.stage_05_mapper.PSObject.Properties['init_min_num_inliers']) {
+    $colmapArgs += @("--Mapper.init_min_num_inliers=$($config.stage_05_mapper.init_min_num_inliers)")
+}
+if ($config.stage_05_mapper.PSObject.Properties['abs_pose_min_num_inliers']) {
+    $colmapArgs += @("--Mapper.abs_pose_min_num_inliers=$($config.stage_05_mapper.abs_pose_min_num_inliers)")
+}
+if ($config.stage_05_mapper.PSObject.Properties['abs_pose_min_inlier_ratio']) {
+    $colmapArgs += @("--Mapper.abs_pose_min_inlier_ratio=$($config.stage_05_mapper.abs_pose_min_inlier_ratio)")
+}
+
+# Add image list if pure-rotation filter created one
+if ($imageListPath -and (Test-Path -LiteralPath $imageListPath)) {
+    $colmapArgs += @("--Mapper.image_list_path", $imageListPath)
+    Write-Host "  Using image list: $imageListPath" -ForegroundColor Yellow
+}
 
 Write-Host ""
 Write-Host "  Running mapper..." -ForegroundColor Cyan
