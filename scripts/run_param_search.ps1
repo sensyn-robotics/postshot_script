@@ -1,7 +1,6 @@
 # run_param_search.ps1
 # Automated parameter search: changes 1 parameter at a time.
-# Always uses sequential matching. Tests fps, max_features, min_model_size.
-# Stops immediately on registration failure, moves to next parameter set.
+# Always uses sequential matching. Stops immediately on failure, moves to next.
 #
 # Usage:
 #   .\scripts\run_param_search.ps1 -ConfigPath config\pipeline.json
@@ -17,7 +16,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location C:\postshot_script
 
-# Prevent sleep, allow screen lock
+# Prevent sleep, allow screen lock (10 min)
 powercfg /change standby-timeout-ac 0
 powercfg /change standby-timeout-dc 0
 powercfg /change monitor-timeout-ac 10
@@ -26,30 +25,26 @@ powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /SETACTIVE SCHEME_CURRENT
 
-# Baseline: COLMAP defaults + sequential matching + filter_degenerate
-# Only change 1 parameter per trial from this baseline
-$baseline = @{
-    fps = 2
-    target_frames = 600
-    max_features = 8192    # COLMAP default
-    min_model_size = 10    # COLMAP default
-}
-
-# Parameter search: change 1 param at a time
+# Parameter sets to try (1 change at a time from baseline)
+# Baseline: v3 settings that worked for scene 1 (SSIM=0.777)
+# + COLMAP defaults for mapper + pure-rotation filter
 $paramSets = @(
-    # --- Baseline (COLMAP defaults) ---
-    @{ name = "baseline_2fps_8k_mms10"; fps = 2; target_frames = 600; max_features = 8192; min_model_size = 10; start_stage = 1 },
+    # Baseline: v3-like (16k features, 2fps, no frame limit, mms=10)
+    @{ name = "v3_baseline"; fps = 2; target_frames = 0; max_features = 16384; min_model_size = 10; overlap = 0; timeout = 3; start_stage = 1 },
 
-    # --- Vary max_features (keep fps=2, mms=10) ---
-    @{ name = "features_16k"; fps = 2; target_frames = 600; max_features = 16384; min_model_size = 10; start_stage = 3 },
+    # Vary min_model_size (reuse matching)
+    @{ name = "mms_30"; fps = 2; target_frames = 0; max_features = 16384; min_model_size = 30; overlap = 0; timeout = 3; start_stage = 5 },
+    @{ name = "mms_50"; fps = 2; target_frames = 0; max_features = 16384; min_model_size = 50; overlap = 0; timeout = 3; start_stage = 5 },
 
-    # --- Vary min_model_size (keep fps=2, features=8k) ---
-    @{ name = "mms_30"; fps = 2; target_frames = 600; max_features = 8192; min_model_size = 30; start_stage = 5 },
-    @{ name = "mms_50"; fps = 2; target_frames = 600; max_features = 8192; min_model_size = 50; start_stage = 5 },
+    # Vary overlap (re-run matching)
+    @{ name = "overlap_20"; fps = 2; target_frames = 0; max_features = 16384; min_model_size = 10; overlap = 20; timeout = 3; start_stage = 4 },
 
-    # --- Vary fps (keep features=8k, mms=10) ---
-    @{ name = "fps_1"; fps = 1; target_frames = 600; max_features = 8192; min_model_size = 10; start_stage = 1 },
-    @{ name = "fps_3"; fps = 3; target_frames = 600; max_features = 8192; min_model_size = 10; start_stage = 1 }
+    # Vary features (re-run features+matching)
+    @{ name = "features_8k"; fps = 2; target_frames = 0; max_features = 8192; min_model_size = 10; overlap = 0; timeout = 3; start_stage = 3 },
+
+    # Vary fps
+    @{ name = "fps_1"; fps = 1; target_frames = 0; max_features = 16384; min_model_size = 10; overlap = 0; timeout = 3; start_stage = 1 },
+    @{ name = "fps_3"; fps = 3; target_frames = 600; max_features = 16384; min_model_size = 10; overlap = 0; timeout = 3; start_stage = 1 }
 )
 
 $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
@@ -60,11 +55,10 @@ $pythonExe = $config.paths.python
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  Parameter Search (1 param at a time)" -ForegroundColor Cyan
-Write-Host "  Baseline: fps=2, features=8192, mms=10" -ForegroundColor Cyan
-Write-Host "  Matching: sequential (always)" -ForegroundColor Cyan
+Write-Host "  Parameter Search" -ForegroundColor Cyan
 Write-Host "  Trials: $($paramSets.Count)" -ForegroundColor Cyan
 Write-Host "  Scenes: $($scenes.Count)" -ForegroundColor Cyan
+Write-Host "  Min registration: $MinRegistrationPct%" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 function Apply-ParamSet {
@@ -76,6 +70,21 @@ function Apply-ParamSet {
     $cfg.stage_03_features.max_features = $ps.max_features
     $cfg.stage_04_matching.type = "sequential"
     $cfg.stage_05_mapper.min_model_size = $ps.min_model_size
+    $cfg.stage_05_mapper.colmap_timeout_hours = $ps.timeout
+
+    # Set or remove overlap
+    if ($ps.overlap -gt 0) {
+        if ($cfg.stage_04_matching.PSObject.Properties['overlap']) {
+            $cfg.stage_04_matching.overlap = $ps.overlap
+        } else {
+            $cfg.stage_04_matching | Add-Member -NotePropertyName 'overlap' -NotePropertyValue $ps.overlap -Force
+        }
+    } else {
+        if ($cfg.stage_04_matching.PSObject.Properties['overlap']) {
+            $cfg.stage_04_matching.PSObject.Properties.Remove('overlap')
+        }
+    }
+
     $cfg | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding UTF8
 }
 
@@ -110,8 +119,7 @@ foreach ($ps in $paramSets) {
     Write-Host ""
     Write-Host "########################################################" -ForegroundColor Yellow
     Write-Host "  $($ps.name)" -ForegroundColor Yellow
-    Write-Host "  fps=$($ps.fps) features=$($ps.max_features) min_model_size=$($ps.min_model_size)" -ForegroundColor Yellow
-    Write-Host "  start_stage=$($ps.start_stage)" -ForegroundColor Yellow
+    Write-Host "  fps=$($ps.fps) features=$($ps.max_features) mms=$($ps.min_model_size) overlap=$($ps.overlap) timeout=$($ps.timeout)h" -ForegroundColor Yellow
     Write-Host "########################################################" -ForegroundColor Yellow
 
     Apply-ParamSet -configPath $ConfigPath -ps $ps
@@ -161,7 +169,7 @@ foreach ($ps in $paramSets) {
     }
 }
 
-# Summary of all trials
+# Summary
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  SEARCH RESULTS" -ForegroundColor Cyan
@@ -207,6 +215,6 @@ if ($winningTrial) {
 # Restore sleep
 powercfg /change standby-timeout-ac 30
 powercfg /change standby-timeout-dc 15
-powercfg /change monitor-timeout-ac 100
+powercfg /change monitor-timeout-ac 10
 powercfg /change monitor-timeout-dc 5
 Write-Host "Sleep settings restored" -ForegroundColor Yellow
