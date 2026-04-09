@@ -80,7 +80,7 @@ All settings live in a single JSON config. See `config/pipeline.json` for the pr
 | **pipeline** | `overwrite_result` | false | Re-run stages even if outputs exist |
 | **pipeline** | `test_data_path` | - | Directory containing scene folders (batch mode) |
 | **stage_01** | `fps` | 2 | Frame extraction rate |
-| **stage_01** | `target_frames` | 600 | Max total frames (0 = no limit) |
+| **stage_01** | `target_frames` | 0 | Max total frames to extract (0 = no limit, extract all) |
 | **stage_02** | `enabled` | false | Enable blur/keyframe filtering |
 | **stage_03** | `camera_model` | SIMPLE_RADIAL | COLMAP camera model |
 | **stage_03** | `single_camera_per_folder` | true | One camera model per subfolder |
