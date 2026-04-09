@@ -43,7 +43,7 @@
                             "multiple_models":  true,
                             "filter_degenerate_pairs":  true,
                             "colmap_timeout_hours":  12,
-                            "min_model_size":  30,
+                            "min_model_size":  50,
                             "visualization_interval_minutes":  10
                         },
     "stage_06_train":  {

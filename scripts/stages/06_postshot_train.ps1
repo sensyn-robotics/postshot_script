@@ -425,7 +425,7 @@ try {
             Write-Host ""
             Write-Host "  Generating visualizations..." -ForegroundColor Cyan
 
-            $renderScript = Join-Path $scriptDir "util/render_checkpoint.py"
+            $renderScript = Join-Path $scriptDir "util\render_checkpoint.py"
 
             if (Test-Path -LiteralPath $renderScript) {
                 # Get final checkpoint number from config (or default to 30000)

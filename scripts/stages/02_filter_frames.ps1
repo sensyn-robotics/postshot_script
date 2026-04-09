@@ -101,7 +101,7 @@ if ($singleVideoMode) {
 Write-Host ""
 Write-Host "--- Step 2a: Blur Detection ---" -ForegroundColor Yellow
 
-$blurScript = Join-Path $scriptDir "util/blur_detector.py"
+$blurScript = Join-Path (Join-Path $scriptDir "util") "blur_detector.py"
 if (-not (Test-Path -LiteralPath $blurScript)) {
     Write-Host "ERROR: blur_detector.py not found at: $blurScript" -ForegroundColor Red
     exit 1

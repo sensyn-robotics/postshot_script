@@ -194,7 +194,9 @@ Write-Host "  Running $matcherType matching..." -ForegroundColor Cyan
 Write-Host "  Command: colmap $($colmapArgs -join ' ')" -ForegroundColor DarkGray
 
 $timeoutHours = 12
-if ($config.stage_05_mapper -and $config.stage_05_mapper.PSObject.Properties['colmap_timeout_hours']) {
+if ($config.stage_04_matching -and $config.stage_04_matching.PSObject.Properties['colmap_timeout_hours']) {
+    $timeoutHours = $config.stage_04_matching.colmap_timeout_hours
+} elseif ($config.stage_05_mapper -and $config.stage_05_mapper.PSObject.Properties['colmap_timeout_hours']) {
     $timeoutHours = $config.stage_05_mapper.colmap_timeout_hours
 }
 $timeoutMs = [int]($timeoutHours * 3600 * 1000)

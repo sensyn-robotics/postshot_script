@@ -127,6 +127,7 @@ foreach ($ps in $paramSets) {
             & .\scripts\run_pipeline_allscene.ps1 -ConfigPath $ConfigPath -ScenePath $scene.FullName -StartStage $ps.start_stage -EndStage 5
         } catch {
             Write-Host "  Pipeline error: $_" -ForegroundColor Red
+            $LASTEXITCODE = 1
         }
 
         if ($LASTEXITCODE -ne 0) {
@@ -179,6 +180,7 @@ if ($winningTrial) {
             & .\scripts\run_pipeline_allscene.ps1 -ConfigPath $ConfigPath -ScenePath $scene.FullName -StartStage 6 -EndStage 7
         } catch {
             Write-Host "  Training error: $_" -ForegroundColor Red
+            $LASTEXITCODE = 1
         }
     }
 

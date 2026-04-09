@@ -12,16 +12,7 @@ param(
     [string]$ScenePath,
 
     [Parameter(Mandatory=$false)]
-    [int]$MinModelSizeOverride = 0,
-
-    [Parameter(Mandatory=$false)]
-    [int]$InitMinNumInliersOverride = 0,
-
-    [Parameter(Mandatory=$false)]
-    [int]$AbsPoseMinNumInliersOverride = 0,
-
-    [Parameter(Mandatory=$false)]
-    [double]$AbsPoseMinInlierRatioOverride = 0
+    [int]$MinModelSizeOverride = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,6 +31,7 @@ if ([string]::IsNullOrWhiteSpace($ScenePath)) {
 }
 
 # Resolve paths
+$scriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $outputDir = Join-Path $ScenePath $config.output.dir_name
 $imagesDir = Join-Path $outputDir $config.output.images_subdir
 $colmapDir = Join-Path $outputDir $config.output.colmap_subdir
@@ -505,11 +497,6 @@ if (-not $largestRecon) {
 Write-Host "  Selected reconstruction: $($largestRecon.Name)" -ForegroundColor Green
 
 # === Remove outlier cameras (degenerate pose estimation) ===
-$filterDegenerate = $true
-if ($config.stage_05_mapper.PSObject.Properties['filter_degenerate_pairs']) {
-    $filterDegenerate = $config.stage_05_mapper.filter_degenerate_pairs
-}
-
 if ($filterDegenerate) {
     $pythonExe = $config.paths.python
     Write-Host ""
@@ -638,7 +625,7 @@ if ($regPct -lt 50) {
 
 # === COLMAP Quality Gate Check ===
 if ($colmapQualityGate) {
-    $qualityScript = Join-Path (Split-Path $PSScriptRoot) "util\check_sparse_quality.py"
+    $qualityScript = Join-Path $scriptDir "util\check_sparse_quality.py"
     $colmapQualityJson = Join-Path $colmapDir "sparse_quality.json"
 
     # Count total images from images directory
