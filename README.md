@@ -80,71 +80,72 @@ All settings live in a single JSON config. See `config/pipeline.json` for the pr
 | **pipeline** | `overwrite_result` | false | Re-run stages even if outputs exist |
 | **pipeline** | `test_data_path` | - | Directory containing scene folders (batch mode) |
 | **stage_01** | `fps` | 2 | Frame extraction rate |
-| **stage_01** | `target_frames` | 0 | Limit total frames (0 = no limit) |
+| **stage_01** | `target_frames` | 600 | Max total frames (0 = no limit) |
 | **stage_02** | `enabled` | false | Enable blur/keyframe filtering |
-| **stage_02** | `target_overlap` | 0.8 | Target overlap between keyframes |
-| **stage_02** | `max_frames` | 400 | Max frames after filtering |
 | **stage_03** | `camera_model` | SIMPLE_RADIAL | COLMAP camera model |
-| **stage_03** | `single_camera` | true | Single camera model for all images |
-| **stage_03** | `max_features` | 16384 | Max SIFT features per image |
+| **stage_03** | `single_camera_per_folder` | true | One camera model per subfolder |
+| **stage_03** | `max_features` | 8192 | Max SIFT features per image (COLMAP default) |
 | **stage_04** | `type` | sequential | Matcher type (sequential/exhaustive) |
-| **stage_04** | `sequential_overlap` | 20 | Image overlap for sequential matcher |
-| **stage_04** | `sequential_loop` | true | Enable loop closure detection |
-| **stage_04** | `guided_matching` | true | Use guided matching |
-| **stage_05** | `min_model_size` | 10 | Min images for valid reconstruction |
-| **stage_05** | `ba_global_max_iterations` | 100 | Global bundle adjustment iterations |
-| **stage_05** | `ba_local_max_iterations` | 25 | Local bundle adjustment iterations |
+| **stage_05** | `filter_degenerate_pairs` | true | Exclude pure-rotation frames via image list |
+| **stage_05** | `colmap_timeout_hours` | 12 | Kill COLMAP if exceeds this time |
+| **stage_05** | `min_model_size` | 10 | Min images for valid reconstruction (COLMAP default) |
 | **stage_06** | `checkpoints` | [10000, 30000] | Training checkpoint steps |
 | **stage_06** | `train_camera` | all | Which camera to train (all/W/Z) |
 | **stage_06** | `train_steps_limit` | 0 | Max training steps (0 = unlimited) |
 | **stage_06** | `profile` | Splat3 | Postshot training profile |
-| **stage_06** | `max_image_size` | 3840 | Max image dimension for training |
 | **stage_07** | `format` | ply | Export format |
+
+Other COLMAP mapper parameters (ba_global_max_iterations, init_min_num_inliers, etc.) use COLMAP defaults unless explicitly set in config.
 
 ### Config Variants
 
 | Config | Purpose |
 |--------|---------|
 | `pipeline.json` | Primary default config |
-| `pipeline_tower_scene1_v3.json` | Tower dataset scene 1 |
-| `pipeline_scene1_retrain.json` | Scene 1 retrain experiment |
 | `pipeline_single.json` | Single-video with quality gates |
+| `pipeline_360.json` | 360-degree equirectangular mode |
 
-## Entry Point Scripts
+## Script Structure
 
-### run_pipeline_allscene.ps1 (Primary)
+```
+run_param_search.ps1                   # Entry point: parameter search
+│   (prevents sleep, tries parameter sets, stops on failure)
+│
+├── run_pipeline_allscene.ps1          # Orchestrator: loops scenes × stages
+│   │
+│   ├── stages/01_extract_frames.ps1           FFmpeg
+│   ├── stages/01b_cubemap_decompose.ps1       (optional 360)
+│   │     └── cubemap_decompose.py
+│   ├── stages/02_filter_frames.ps1
+│   │     ├── blur_detector.py
+│   │     └── optical_flow_analyzer.py
+│   ├── stages/03_colmap_features.ps1          COLMAP feature_extractor
+│   ├── stages/04_colmap_matching.ps1          COLMAP matcher (with timeout)
+│   ├── stages/05_colmap_mapper.ps1            COLMAP mapper (with timeout)
+│   │     └── check_sparse_quality.py
+│   ├── stages/06_postshot_train.ps1           Postshot 3DGS training
+│   │     ├── compute_lpips.py
+│   │     └── render_checkpoint.py
+│   └── stages/07_postshot_export.ps1          PLY export
+│
+└── (checks registration ≥50%, runs training if all scenes pass)
 
-Orchestrate all stages for one or all scenes.
+run_pipeline_single.ps1                # Single scene with quality gates + retry
+└── (same stages as above)
 
-```powershell
-# All scenes in test_data_path
-.\scripts\run_pipeline_allscene.ps1 -ConfigPath config\pipeline.json
-
-# Single scene
-.\scripts\run_pipeline_allscene.ps1 -ConfigPath config\pipeline.json -ScenePath "C:\path\to\scene"
-
-# Resume from stage 5
-.\scripts\run_pipeline_allscene.ps1 -ConfigPath config\pipeline.json -StartStage 5
+run_lpips_all.ps1                      # Standalone: batch LPIPS metrics
+└── compute_lpips.py
 ```
 
-Parameters:
-- `-ConfigPath` (required): Path to config JSON
-- `-ScenePath` (optional): Single scene directory. If omitted, processes all scenes in `test_data_path`
-- `-StartStage` (default: 1): Start from stage N
-- `-EndStage` (default: 7): End at stage N
+### Entry Points
 
-### run_pipeline_single.ps1
+| Script | Purpose | Usage |
+|--------|---------|-------|
+| `run_param_search.ps1` | Automated parameter search across all scenes | `.\scripts\run_param_search.ps1 -ConfigPath config\pipeline.json` |
+| `run_pipeline_allscene.ps1` | Run pipeline on one or all scenes | `.\scripts\run_pipeline_allscene.ps1 -ConfigPath config\pipeline.json` |
+| `run_pipeline_single.ps1` | Single scene with quality gates and auto-retry | `.\scripts\run_pipeline_single.ps1 -ConfigPath config\pipeline_single.json` |
 
-Single-scene pipeline with quality gates and auto-retry.
-
-- Quality thresholds: `min_ssim` (default 0.80), `max_lpips`
-- Auto-retry: progressively lowers FPS and image scale
-
-### run_tower_comparison.ps1
-
-Compare sequential vs exhaustive matcher on tower scenes.
-
-## Python Utilities
+### Standalone Python Utilities
 
 | Script | Purpose |
 |--------|---------|
@@ -153,11 +154,14 @@ Compare sequential vs exhaustive matcher on tower scenes.
 | `frame_selector.py` | Combined blur removal + keyframe selection |
 | `compute_lpips.py` | Compute LPIPS, PSNR metrics from PLY renders |
 | `check_sparse_quality.py` | Evaluate COLMAP reconstruction quality |
+| `check_colmap_quality.py` | Check COLMAP reconstruction viability |
 | `render_checkpoint.py` | Render PLY to multi-view images |
 | `render_pointcloud.py` | Render COLMAP sparse point cloud |
 | `read_colmap_model.py` | Parse and report COLMAP binary model stats |
 | `cubemap_decompose.py` | Convert equirectangular to cubemap faces |
 | `resize_images.py` | Resize images for resolution testing |
+| `analyze_matches.py` | Analyze feature match distribution |
+| `analyze_overlap.py` | Analyze frame-to-frame overlap |
 
 ## Output Structure
 
@@ -197,22 +201,19 @@ When processing folders with dual-camera videos (e.g., DJI Wide + Zoom):
 ```
 postshot_script/
 ├── config/
-│   ├── pipeline.json              # Primary unified config
-│   └── [variant configs]          # Experiment-specific configs
+│   ├── pipeline.json              # Primary config (COLMAP defaults + tuning params)
+│   ├── default_config.json        # Legacy config (reference only)
+│   ├── pipeline_single.json       # Single scene with quality gates
+│   └── pipeline_360.json          # 360-degree mode
 ├── lib/
 │   └── config_loader.ps1          # Config loading utilities
 ├── scripts/
-│   ├── stages/                    # 7 modular stage scripts
-│   │   ├── 01_extract_frames.ps1
-│   │   ├── 01b_cubemap_decompose.ps1
-│   │   ├── 02_filter_frames.ps1
-│   │   ├── 03_colmap_features.ps1
-│   │   ├── 04_colmap_matching.ps1
-│   │   ├── 05_colmap_mapper.ps1
-│   │   ├── 06_postshot_train.ps1
-│   │   └── 07_postshot_export.ps1
-│   ├── run_pipeline_allscene.ps1  # Main pipeline runner
+│   ├── stages/                    # 7 modular stage scripts (01-07)
+│   ├── run_param_search.ps1       # Parameter search (entry point)
+│   ├── run_pipeline_allscene.ps1  # Pipeline orchestrator
 │   ├── run_pipeline_single.ps1    # Single scene with quality gates
+│   ├── run_lpips_all.ps1          # Batch LPIPS metrics
+│   ├── create_test_dataset.ps1    # Create small test dataset
 │   ├── [Python utilities]         # Analysis and processing scripts
 │   └── debug/                     # Diagnostic scripts
 ├── tests/
