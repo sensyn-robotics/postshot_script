@@ -40,3 +40,4 @@ data/
 *secret*
 *.key
 main.py
+scripts/_archive/
