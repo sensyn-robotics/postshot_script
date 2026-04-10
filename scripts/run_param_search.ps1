@@ -1,6 +1,7 @@
 # run_param_search.ps1
-# Automated parameter search: changes 1 parameter at a time.
-# Always uses sequential matching. Stops immediately on failure, moves to next.
+# Parameter search: min_model_size × max_features grid.
+# Fixed: 2fps, sequential matching, COLMAP defaults, filter off.
+# Stops immediately on registration failure, moves to next.
 #
 # Usage:
 #   .\scripts\run_param_search.ps1 -ConfigPath config\pipeline.json
@@ -25,27 +26,39 @@ powercfg /SETACVALUEINDEX SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /SETDCVALUEINDEX SCHEME_CURRENT SUB_BUTTONS LIDACTION 0
 powercfg /SETACTIVE SCHEME_CURRENT
 
-# Parameter sets to try (1 change at a time from baseline)
-# Baseline: v3 settings that worked for scene 1 (SSIM=0.777)
-# + COLMAP defaults for mapper + pure-rotation filter
-$paramSets = @(
-    # Baseline: v3-like (16k features, 2fps, no frame limit, mms=10)
-    @{ name = "v3_baseline"; fps = 2; target_frames = 0; max_features = 16384; min_model_size = 10; overlap = 0; timeout = 3; start_stage = 1 },
+# Fixed parameters (not searched)
+$fixedFps = 2
+$fixedTargetFrames = 0  # 0 = no limit
+$fixedTimeout = 3       # hours
 
-    # Vary min_model_size (reuse matching)
-    @{ name = "mms_30"; fps = 2; target_frames = 0; max_features = 16384; min_model_size = 30; overlap = 0; timeout = 3; start_stage = 5 },
-    @{ name = "mms_50"; fps = 2; target_frames = 0; max_features = 16384; min_model_size = 50; overlap = 0; timeout = 3; start_stage = 5 },
+# Search grid: min_model_size first (fast, reuses matching), then max_features
+$minModelSizes = @(10, 3, 30, 50)
+$maxFeatures = @(16384, 8192, 32768)
 
-    # Vary overlap (re-run matching)
-    @{ name = "overlap_20"; fps = 2; target_frames = 0; max_features = 16384; min_model_size = 10; overlap = 20; timeout = 3; start_stage = 4 },
+# Build trial list: sweep min_model_size for each feature count
+$paramSets = @()
+foreach ($feat in $maxFeatures) {
+    foreach ($mms in $minModelSizes) {
+        $startStage = 5  # default: reuse matching, only re-run mapper
 
-    # Vary features (re-run features+matching)
-    @{ name = "features_8k"; fps = 2; target_frames = 0; max_features = 8192; min_model_size = 10; overlap = 0; timeout = 3; start_stage = 3 },
+        # First trial for each feature count needs features + matching
+        $isFirstForFeat = ($mms -eq $minModelSizes[0])
+        if ($isFirstForFeat) {
+            # Check if we need to re-extract features (different feature count)
+            $startStage = 3
+        }
 
-    # Vary fps
-    @{ name = "fps_1"; fps = 1; target_frames = 0; max_features = 16384; min_model_size = 10; overlap = 0; timeout = 3; start_stage = 1 },
-    @{ name = "fps_3"; fps = 3; target_frames = 600; max_features = 16384; min_model_size = 10; overlap = 0; timeout = 3; start_stage = 1 }
-)
+        $paramSets += @{
+            name = "feat${feat}_mms${mms}"
+            max_features = $feat
+            min_model_size = $mms
+            start_stage = $startStage
+        }
+    }
+}
+
+# First trial always starts from stage 1 (extract frames)
+$paramSets[0].start_stage = 1
 
 $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
 $towerPath = $config.pipeline.test_data_path
@@ -56,35 +69,25 @@ $pythonExe = $config.paths.python
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  Parameter Search" -ForegroundColor Cyan
+Write-Host "  Fixed: 2fps, sequential, COLMAP defaults" -ForegroundColor Cyan
+Write-Host "  Search: min_model_size=$($minModelSizes -join ',') x max_features=$($maxFeatures -join ',')" -ForegroundColor Cyan
 Write-Host "  Trials: $($paramSets.Count)" -ForegroundColor Cyan
 Write-Host "  Scenes: $($scenes.Count)" -ForegroundColor Cyan
 Write-Host "  Min registration: $MinRegistrationPct%" -ForegroundColor Cyan
+Write-Host "  Timeout: ${fixedTimeout}h" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 function Apply-ParamSet {
     param($configPath, $ps)
     $cfg = Get-Content $configPath -Raw | ConvertFrom-Json
     $cfg.pipeline.overwrite_result = $true
-    $cfg.stage_01_extract.fps = $ps.fps
-    $cfg.stage_01_extract.target_frames = $ps.target_frames
+    $cfg.stage_01_extract.fps = $fixedFps
+    $cfg.stage_01_extract.target_frames = $fixedTargetFrames
     $cfg.stage_03_features.max_features = $ps.max_features
     $cfg.stage_04_matching.type = "sequential"
     $cfg.stage_05_mapper.min_model_size = $ps.min_model_size
-    $cfg.stage_05_mapper.colmap_timeout_hours = $ps.timeout
-
-    # Set or remove overlap
-    if ($ps.overlap -gt 0) {
-        if ($cfg.stage_04_matching.PSObject.Properties['overlap']) {
-            $cfg.stage_04_matching.overlap = $ps.overlap
-        } else {
-            $cfg.stage_04_matching | Add-Member -NotePropertyName 'overlap' -NotePropertyValue $ps.overlap -Force
-        }
-    } else {
-        if ($cfg.stage_04_matching.PSObject.Properties['overlap']) {
-            $cfg.stage_04_matching.PSObject.Properties.Remove('overlap')
-        }
-    }
-
+    $cfg.stage_05_mapper.colmap_timeout_hours = $fixedTimeout
+    $cfg.stage_05_mapper.filter_degenerate_pairs = $false
     $cfg | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding UTF8
 }
 
@@ -114,13 +117,20 @@ print(best)
 
 $winningTrial = $null
 $results = @()
+$prevFeatures = 0
 
 foreach ($ps in $paramSets) {
     Write-Host ""
     Write-Host "########################################################" -ForegroundColor Yellow
     Write-Host "  $($ps.name)" -ForegroundColor Yellow
-    Write-Host "  fps=$($ps.fps) features=$($ps.max_features) mms=$($ps.min_model_size) overlap=$($ps.overlap) timeout=$($ps.timeout)h" -ForegroundColor Yellow
+    Write-Host "  features=$($ps.max_features) min_model_size=$($ps.min_model_size) start=$($ps.start_stage)" -ForegroundColor Yellow
     Write-Host "########################################################" -ForegroundColor Yellow
+
+    # If features changed from previous trial, need to re-run from stage 3
+    if ($ps.max_features -ne $prevFeatures -and $prevFeatures -ne 0) {
+        $ps.start_stage = 3
+    }
+    $prevFeatures = $ps.max_features
 
     Apply-ParamSet -configPath $ConfigPath -ps $ps
 
