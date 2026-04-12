@@ -37,13 +37,14 @@
                               "max_features":  16384
                           },
     "stage_04_matching":  {
-                              "type":  "sequential"
+                              "type":  "sequential",
+                              "sift_max_ratio":  0.8
                           },
     "stage_05_mapper":  {
                             "multiple_models":  true,
                             "filter_degenerate_pairs":  false,
-                            "colmap_timeout_hours":  3,
-                            "min_model_size":  10,
+                            "colmap_timeout_hours":  12,
+                            "min_model_size":  3,
                             "visualization_interval_minutes":  10
                         },
     "stage_06_train":  {
