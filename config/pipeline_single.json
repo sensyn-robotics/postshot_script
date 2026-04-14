@@ -1,0 +1,78 @@
+{
+  "pipeline": {
+    "overwrite_result": false,
+    "test_data_path": "C:\\postshot_script\\data"
+  },
+  "input": {
+    "scene_path": ""
+  },
+  "output": {
+    "dir_name": "output",
+    "images_subdir": "images",
+    "colmap_subdir": "colmap",
+    "postshot_subdir": "postshot",
+    "visualizations_subdir": "visualizations"
+  },
+  "paths": {
+    "ffmpeg": "C:\\ffmpeg\\bin\\ffmpeg.exe",
+    "colmap": "C:\\COLMAP\\COLMAP.bat",
+    "postshot_cli": "C:\\Program Files\\Jawset Postshot\\bin\\postshot-cli.exe",
+    "python": "python",
+    "temp": "C:\\Postshot_Temp"
+  },
+  "stage_01_extract": {
+    "fps": 2,
+    "format": "png",
+    "quality": 2
+  },
+  "stage_02_filter": {
+    "enabled": false,
+    "blur_threshold": "auto",
+    "target_overlap": 0.99,
+    "max_frames": 600
+  },
+  "stage_03_features": {
+    "camera_model": "SIMPLE_RADIAL",
+    "single_camera": true,
+    "single_camera_per_folder": false,
+    "max_features": 8192
+  },
+  "stage_04_matching": {
+    "type": "sequential"
+  },
+  "stage_05_mapper": {
+    "multiple_models": true,
+    "min_model_size": 50,
+    "ba_global_max_iterations": 50,
+    "ba_local_max_iterations": 15,
+    "init_min_num_inliers": 50,
+    "abs_pose_min_num_inliers": 15,
+    "abs_pose_min_inlier_ratio": 0.15,
+    "visualization_interval_minutes": 10
+  },
+  "stage_06_train": {
+    "checkpoints": [5000, 10000, 30000],
+    "profile": "Splat3",
+    "save_visualization": true,
+    "train_camera": "all",
+    "anti_aliasing": true,
+    "train_steps_limit": 50,
+    "max_num_features": 16,
+    "max_sh_degree": 3,
+    "max_image_size": 3840,
+    "show_train_error": true
+  },
+  "stage_07_export": {
+    "format": "ply"
+  },
+  "quality_gate": {
+    "min_ssim": 0.75,
+    "retry_strategy": [
+      { "fps": 2, "scale": 1.0 },
+      { "fps": 1, "scale": 1.0 },
+      { "fps": 1, "scale": 0.8 },
+      { "fps": 1, "scale": 0.64 },
+      { "fps": 1, "scale": 0.512 }
+    ]
+  }
+}

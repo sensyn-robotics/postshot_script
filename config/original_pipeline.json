@@ -1,0 +1,74 @@
+{
+    "pipeline": {
+        "overwrite_result": false,
+        "test_data_path": "C:\\postshot_script\\data\\tower"
+    },
+    "input": {
+        "scene_path": "",
+        "video_w": "video_W.mp4",
+        "video_z": "video_Z.mp4"
+    },
+    "output": {
+        "dir_name": "output",
+        "images_subdir": "images",
+        "colmap_subdir": "colmap",
+        "postshot_subdir": "postshot",
+        "visualizations_subdir": "visualizations"
+    },
+    "paths": {
+        "ffmpeg": "C:\\ffmpeg\\bin\\ffmpeg.exe",
+        "colmap": "C:\\COLMAP\\COLMAP.bat",
+        "postshot_cli": "C:\\Program Files\\Jawset Postshot\\bin\\postshot-cli.exe",
+        "python": "python",
+        "temp": "C:\\Postshot_Temp"
+    },
+    "stage_01_extract": {
+        "fps": 2,
+        "target_frames": 0,
+        "format": "png",
+        "quality": 2
+    },
+    "stage_02_filter": {
+        "enabled": false
+    },
+    "stage_03_features": {
+        "camera_model": "SIMPLE_RADIAL",
+        "single_camera": false,
+        "single_camera_per_folder": false,
+        "max_features": 8192
+    },
+    "stage_04_matching": {
+        "type": "sequential",
+        "sift_max_ratio": 0.8,
+        "guided_matching": false,
+        "loop_detection": false,
+        "overlap": 10
+    },
+    "stage_05_mapper": {
+        "multiple_models": true,
+        "filter_degenerate_pairs": false,
+        "colmap_timeout_hours": 12,
+        "min_model_size": 10,
+        "init_min_num_inliers": 100,
+        "abs_pose_min_num_inliers": 30,
+        "abs_pose_min_inlier_ratio": 0.25,
+        "ba_global_max_iterations": 50,
+        "ba_local_max_iterations": 25,
+        "visualization_interval_minutes": 10
+    },
+    "stage_06_train": {
+        "checkpoints": [10000, 30000],
+        "profile": "Splat3",
+        "save_visualization": false,
+        "train_camera": "all",
+        "anti_aliasing": false,
+        "train_steps_limit": 0,
+        "max_num_features": 8,
+        "max_sh_degree": 3,
+        "max_image_size": 3840,
+        "show_train_error": false
+    },
+    "stage_07_export": {
+        "format": "ply"
+    }
+}

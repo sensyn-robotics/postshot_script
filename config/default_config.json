@@ -1,0 +1,39 @@
+{
+  "paths": {
+    "colmap_exe": "C:\\COLMAP\\COLMAP.bat",
+    "ffmpeg_exe": "C:\\ffmpeg\\bin\\ffmpeg.exe",
+    "postshot_cli": "C:\\Program Files\\Jawset Postshot\\bin\\postshot-cli.exe",
+    "temp_directory": "C:\\Postshot_Temp"
+  },
+  "video_extraction": {
+    "fps": 0.5,
+    "output_format": "png",
+    "quality": 2
+  },
+  "colmap": {
+    "feature_extractor": {
+      "ImageReader.single_camera_per_folder": 1,
+      "ImageReader.camera_model": "SIMPLE_RADIAL",
+      "SiftExtraction.max_num_features": 8192
+    },
+    "matcher": {
+      "type": "custom_pairs",
+      "temporal_overlap": 10,
+      "cross_camera_same_timestamp": true
+    },
+    "mapper": {
+      "Mapper.ba_global_max_num_iterations": 50,
+      "Mapper.ba_global_function_tolerance": 0.0001,
+      "Mapper.ba_local_max_num_iterations": 15,
+      "Mapper.multiple_models": 1,
+      "Mapper.init_min_num_inliers": 50,
+      "Mapper.abs_pose_min_num_inliers": 15,
+      "Mapper.abs_pose_min_inlier_ratio": 0.15,
+      "Mapper.min_model_size": 50
+    }
+  },
+  "postshot": {
+    "train_iterations": 30000,
+    "export_ply": true
+  }
+}

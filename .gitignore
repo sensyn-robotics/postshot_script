@@ -18,11 +18,26 @@ images/
 Thumbs.db
 Desktop.ini
 
+# Python
+__pycache__/
+*.pyc
+.venv/
+
 # IDE
 .vscode/
 .idea/
+.claude/
+
+# Debug/temp artifacts
+mapper_output.txt
+nul
+
+# Test data (large video files)
+data/
 
 # Credentials (never commit)
 *credentials*
 *secret*
 *.key
+main.py
+scripts/_archive/
