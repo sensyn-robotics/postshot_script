@@ -38,7 +38,9 @@
                           },
     "stage_04_matching":  {
                               "type":  "sequential",
-                              "sift_max_ratio":  0.8
+                              "sift_max_ratio":  0.8,
+                              "loop_detection":  true,
+                              "guided_matching":  true
                           },
     "stage_05_mapper":  {
                             "multiple_models":  true,
